@@ -24,6 +24,8 @@ Ruff lint passed, and Ruff formatting confirmed all seven Python files formatted
 The demo also passed; its JSON report verified five completed tasks, five
 completed attempts, and all five worker reservations released. This verifies
 the documented mock-only M1 scope, not the planned desktop or real Codex runtime.
+The M1 baseline checks were rerun successfully before starting M2. Verification
+applies to the complete M1 file set, not intermediate file-by-file commits.
 Fresh-session instruction discovery remains unverified.
 
 Python 3.11+ is required; use `venv` and `pip`. Pydantic 2 is the runtime dependency;

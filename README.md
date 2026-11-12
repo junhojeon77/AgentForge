@@ -50,6 +50,10 @@ confirmed five completed tasks, five completed attempts, and all five workers re
 that M1's in-memory mock workflow works; real Codex execution and the desktop application remain
 future milestones.
 
+The same checks were rerun successfully before recording the M1 Git baseline, so M2 can build on
+a verified starting point. File-by-file baseline commits depend on the complete M1 file set;
+verification applies to that combined state, not each intermediate commit.
+
 Read [the M1 contracts and limitations](docs/milestones/M1-domain.md) for the library interface,
 scheduling policy, and milestone acceptance checks. State is lost when the process exits. Codex,
 worktrees, actual validation commands, persistence, recovery, APIs, and the desktop UI are future work.
