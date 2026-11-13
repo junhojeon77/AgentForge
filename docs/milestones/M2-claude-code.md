@@ -7,6 +7,11 @@ process per task (`claude -p`) and turns its reply into a `WorkerResult`. It plu
 `Scheduler` unchanged: register it for any role with `register_worker`. Workers are read-only. They
 can read, search and list files in the task's workspace, but they cannot edit files or run commands.
 
+Agents are fully customizable. `agentforge.personas` keeps each agent as one editable Markdown file.
+You can add an agent with any id and role, remove any agent (the defaults included), and change
+each agent's model, reasoning level and persona. `python -m agentforge setup` copies the five
+defaults only into a folder that has no personas yet.
+
 M2 originally named a Codex adapter on the roadmap. It was switched to Claude Code by decision on
 2026-11-13. No new Python dependency was added; the adapter uses `asyncio` subprocesses.
 
