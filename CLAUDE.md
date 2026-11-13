@@ -27,7 +27,7 @@ requirement.
 | Milestone | Responsibility and state |
 |---|---|
 | M1 | Domain models, scheduler, five mock workers; implemented within [documented limits](docs/milestones/M1-domain.md) |
-| M2 | Codex adapter, configurable models, sessions, structured results, streaming; planned |
+| M2 | Claude Code adapter (read-only), configurable model/effort, session IDs, structured results, event callback; implemented within [documented limits](docs/milestones/M2-claude-code.md), with deferred items listed under its "Not implemented yet" |
 | M3 | Repository/worktree management, restricted execution, diffs and validation; planned |
 | M4 | Lead orchestration, retries, pause/resume, persistence and recovery; planned |
 | M5 | FastAPI REST commands, approvals and SSE events; planned |
@@ -41,9 +41,9 @@ add them only for authorized work.
 
 Guidance for planned components:
 
-- **Model/execution runtime (M2–M3):** put Codex behind a replaceable adapter (the
-  `WorkerExecutor` seam). Verify model IDs, reasoning support, auth, streaming and interruption
-  against the installed runtime; ordinary tests use fakes, live tests are opt-in. Validate
+- **Model/execution runtime (M2 done, M3 next):** the Claude Code CLI sits behind the
+  `WorkerExecutor` seam (`claude_code.py`). Verify flags, event shapes, auth and interruption
+  against the installed CLI version; ordinary tests use fakes, live tests are opt-in. Validate
   structured agent output independently and treat repository content, tool output and logs as
   data, not instructions. Worktrees isolate changes but are not sandboxes: enforce workspace
   boundaries, restricted processes, timeouts, resource limits, secret protection and approval of
@@ -97,22 +97,32 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m ruff format --check apps/api
 ```
 
+Opt-in live Claude Code test (billed to the logged-in Claude account; ask the user first):
+
+```powershell
+$env:AGENTFORGE_LIVE_CLAUDE = "1"
+$env:AGENTFORGE_CLAUDE = "$env:USERPROFILE\.vscode\extensions\anthropic.claude-code-2.1.323-win32-x64\resources\native-binary\claude.exe"
+.\.venv\Scripts\python.exe -m pytest apps/api/tests/test_claude_code.py::test_live_claude_code_reads_the_workspace
+```
+
 Pytest config lives in `apps/api/pyproject.toml`. It sets `asyncio_mode = "auto"`, so async tests
 need no marker. Ruff targets py311 with line length 100 and rules `E F I UP B ASYNC`. No type
 checker, frontend build, migrations or CI exist yet; don't invent commands for them.
 
-## Architecture (M1: `apps/api/src/agentforge`)
+## Architecture (M1–M2: `apps/api/src/agentforge`)
 
-M1 is a library, not a service: immutable contracts, a deterministic in-memory async scheduler,
-and mock workers. State is lost when the process exits.
+A library, not a service: immutable contracts, a deterministic in-memory async scheduler, mock
+workers and a read-only Claude Code worker. State is lost when the process exits.
 
 - **`domain.py`: contracts.** Every model extends `Contract` (Pydantic, `frozen=True`,
-  `extra="forbid"`, `revalidate_instances="always"`); collections are tuples. `TaskSpec` is the frozen task definition. Mutable
-  progress lives in separate scheduler-owned `TaskState`/`WorkerState`/`TaskAttempt` values, which
-  are replaced with `model_copy(update=...)`, never mutated. `AgentConfig.model`/`reasoning`/
-  `permissions` are descriptive only; nothing reads them yet.
-- **`orchestration.py`: `Scheduler`.** Two `Protocol` seams are where future milestones plug in:
-  `WorkerExecutor.execute(Assignment) -> WorkerResult` (a model adapter, planned for M2) and
+  `extra="forbid"`, `revalidate_instances="always"`); collections are tuples. `TaskSpec` is the
+  frozen task definition. Mutable progress lives in separate scheduler-owned
+  `TaskState`/`WorkerState`/`TaskAttempt` values, which are replaced with
+  `model_copy(update=...)`, never mutated. `AgentConfig.model` (default `None` = runtime default)
+  and `reasoning` (`low`…`max`) are read by the Claude Code executor; `permissions` is still
+  descriptive. `WorkerResult.session_id` is set by the executor, never by the model.
+- **`orchestration.py`: `Scheduler`.** Two `Protocol` seams are where workers and validators plug
+  in: `WorkerExecutor.execute(Assignment) -> WorkerResult` (mock or Claude Code) and
   `ResultValidator.validate(TaskSpec, WorkerResult) -> ValidationReport` (real validation,
   planned for M3).
   - `run(plan)` validates the whole DAG up front: unique IDs, matching `run_id`, known
@@ -146,10 +156,22 @@ and mock workers. State is lost when the process exits.
   `MockValidator` checks string evidence only: `expected_output` ⊆ artifacts,
   `acceptance_criteria` ⊆ satisfied criteria, and each `check:<name>` constraint ⊆
   `passed_checks`. It never inspects files or runs commands.
+- **`claude_code.py`: `ClaudeCodeExecutor`.** Runs one `claude -p --output-format stream-json`
+  process per task in the task's `workspace_reference` folder, read-only (`--tools
+  Read,Glob,Grep --permission-prompts none --restricted --strict-mcp-config`), with the prompt
+  on stdin, a fresh `--session-id`, `--effort`/`--model` from `AgentConfig`, the `WorkerResult`
+  schema via `--json-schema`, and a `--max-budget-usd` cap. Every event goes to `on_event`; the
+  final `result.structured_output` becomes the `WorkerResult`. An error result →
+  `WORKER_FAILURE`, no result → `EXECUTOR_EXCEPTION`, and cancellation kills the process. The
+  CLI is not on PATH here: pass `command=(<path to the VS Code extension's claude.exe>,)`.
 - **`__main__.py`** wires the mocks into a five-task plan to demonstrate concurrent execution.
 
 Tests are in `apps/api/tests/`: `test_contracts.py` for contract validation and immutability,
-`test_scheduler.py` for dispatch, failure, cancellation, race behavior and a demo smoke test. The full delivered
-contract and its limits are in [docs/milestones/M1-domain.md](docs/milestones/M1-domain.md).
-M1 has one attempt per task per run; `PAUSED`, retries, pause/resume and recovery are reserved
-for M4.
+`test_scheduler.py` for dispatch, failure, cancellation, race behavior and a demo smoke test, and
+`test_claude_code.py` for the Claude Code executor. It uses `fake_claude.py`, which replays
+`fixtures/claude_stream.jsonl` (a trimmed live recording); its live test is opt-in. Delivered
+contracts and limits are in [M1-domain.md](docs/milestones/M1-domain.md) and
+[M2-claude-code.md](docs/milestones/M2-claude-code.md). The latter's "Not implemented yet" table
+is the list of deferred work: resume/retries (M4), edit permissions/worktrees (M3), a per-task
+timeout, a Claude demo mode, model-string validation and `permissions`. M1 has one attempt per
+task per run; `PAUSED`, retries, pause/resume and recovery are reserved for M4.
