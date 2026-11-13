@@ -1,5 +1,9 @@
 # Roadmap
 
+The goal: one lead agent coordinates specialized coding agents. Five ship by default, and users
+can add, remove or fully customize any of them. Adding, removing and editing agent files works
+today (M2). On-screen editing is planned for M6.
+
 AgentForge is built in milestones. Only M1 and M2 are implemented. The rest is direction, not a
 promise, and not permission to start a later milestone early (see [GOVERNANCE.md](GOVERNANCE.md)).
 

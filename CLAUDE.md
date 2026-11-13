@@ -4,8 +4,8 @@ This file gives instructions to AI coding assistants working on this project.
 
 ## Project Overview
 
-AgentForge is a planned local-first Windows platform where one lead agent coordinates five
-specialized coding agents. M1–M2 are implemented as a Python library in `apps/api/src/agentforge`.
+AgentForge is a planned local-first Windows platform where one lead agent coordinates specialized
+coding agents: five by default, and users can add, remove or fully customize any of them. M1–M2 are implemented as a Python library in `apps/api/src/agentforge`.
 Everything else is planned. Keep AI reasoning separate from deterministic scheduling, validation,
 permissions and human approval.
 

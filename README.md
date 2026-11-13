@@ -1,6 +1,7 @@
 # AgentForge
 
-A local-first Windows platform where one lead agent coordinates five specialized coding agents.
+A local-first Windows platform where one lead agent coordinates specialized coding agents. It ships
+with five, and you can add, remove or fully customize any of them.
 
 **Status:** M1–M2 are implemented as a Python library. The desktop app, REST API, persistence and
 the lead agent are planned, not built.
@@ -8,8 +9,10 @@ the lead agent are planned, not built.
 ## What is AgentForge
 
 AgentForge is a planned Windows desktop platform for coordinating software development agents. A
-lead agent breaks a request into tasks, and five specialized workers (backend, frontend, database,
-QA and integration) carry them out under deterministic control and human approval.
+lead agent breaks a request into tasks, and specialized workers carry them out under deterministic
+control and human approval. Five agents come by default (backend, frontend, database, QA and
+integration). The team is yours to shape: add or remove agents, and set each one's role, model,
+reasoning level and persona. At most five run at once.
 
 What exists today is the core library (`apps/api/src/agentforge`):
 
