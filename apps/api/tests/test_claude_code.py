@@ -105,13 +105,29 @@ async def test_runs_read_only_claude_and_returns_structured_result(workspace):
     assert flag(argv, "--permission-prompts") == "none"
     assert flag(argv, "--max-budget-usd") == "1.0"
     assert {"-p", "--verbose", "--restricted", "--strict-mcp-config"} <= set(argv)
+    assert "--permission-mode" not in argv
+    assert "cannot edit files" in call["stdin"]
     schema = json.loads(flag(argv, "--json-schema"))
-    assert "session_id" not in schema["properties"]
+    assert not {"session_id", "workspace", "diff"} & set(schema["properties"])
     assert set(schema["required"]) == set(schema["properties"])
     assert pathlib.Path(call["cwd"]).samefile(workspace)  # noqa: ASYNC240
     assert "Read the file" in call["stdin"] and "read hello.txt" in call["stdin"]
     assert [task_id for task_id, _ in events] == ["a"] * 7
     assert events[0][1] == "system" and events[-1][1] == "result"
+
+
+async def test_edit_task_gets_edit_tools_but_no_commands(workspace):
+    edit = task(workspace).model_copy(update={"allowed_operations": ("edit",)})
+    await executor().execute(Assignment(task=edit, worker=AgentConfig(id="w", role="backend")))
+
+    call = fake_call(workspace)
+    argv = call["argv"]
+    assert flag(argv, "--tools") == "Read,Glob,Grep,Edit,Write"
+    assert flag(argv, "--permission-mode") == "acceptEdits"
+    assert flag(argv, "--permission-prompts") == "none"
+    assert {"--restricted", "--strict-mcp-config"} <= set(argv)
+    assert "can edit files" in call["stdin"] and "cannot run commands" in call["stdin"]
+    assert "cannot edit files" not in call["stdin"]
 
 
 async def test_error_result_is_a_worker_failure_with_session(workspace, monkeypatch):

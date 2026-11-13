@@ -19,7 +19,9 @@ pathlib.Path(os.environ["FAKE_CLAUDE_LOG"]).write_text(json.dumps(log), encoding
 
 events = FIXTURE.read_text(encoding="utf-8").replace("SESSION_ID", session_id).splitlines()
 mode = os.environ.get("FAKE_CLAUDE_MODE", "ok")
-if mode == "ok":
+if mode == "edit":
+    pathlib.Path("fake_edit.txt").write_text("edited by fake claude\n", encoding="utf-8")
+if mode in ("ok", "edit"):
     print("\n".join(events), flush=True)
 elif mode == "error_result":
     print(events[0], flush=True)

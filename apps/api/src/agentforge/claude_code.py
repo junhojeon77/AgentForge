@@ -1,4 +1,6 @@
-"""Claude Code worker: runs `claude -p` read-only and returns its structured WorkerResult.
+"""Claude Code worker: runs `claude -p` and returns its structured WorkerResult.
+
+Read-only unless the task allows "edit"; it never gets a tool that runs commands.
 
 Flags and the stream-json event shapes were checked against Claude Code CLI 2.1.323.
 """
@@ -14,21 +16,33 @@ from collections.abc import Callable, Sequence
 from agentforge.domain import Assignment, TaskSpec, WorkerResult
 
 READ_ONLY_TOOLS = "Read,Glob,Grep"
+EDIT_TOOLS = READ_ONLY_TOOLS + ",Edit,Write"  # still nothing that runs commands
 STREAM_LIMIT = 16 * 1024 * 1024  # one stream-json event per line; tool results can be large
 
 
 def _result_schema() -> str:
     schema = WorkerResult.model_json_schema()
-    del schema["properties"]["session_id"]
+    for executor_field in ("session_id", "workspace", "diff"):
+        del schema["properties"][executor_field]
     schema["required"] = list(schema["properties"])
     return json.dumps(schema)
 
 
+def _can_edit(task: TaskSpec) -> bool:
+    return "edit" in task.allowed_operations
+
+
 def _prompt(task: TaskSpec) -> str:
-    lines = [
-        "You are a read-only AgentForge worker. You can read, search and list files in the "
-        "current folder, but you cannot edit files or run commands."
-    ]
+    if _can_edit(task):
+        lines = [
+            "You are an AgentForge worker. You can edit files in the current folder, but you "
+            "cannot run commands; AgentForge runs the checks after you finish."
+        ]
+    else:
+        lines = [
+            "You are a read-only AgentForge worker. You can read, search and list files in the "
+            "current folder, but you cannot edit files or run commands."
+        ]
     sections = (
         ("Task", task.title),
         ("Description", task.description),
@@ -82,11 +96,14 @@ class ClaudeCodeExecutor:
             "--json-schema", _result_schema(),
             "--session-id", session_id,
             "--effort", worker.reasoning,
-            "--tools", READ_ONLY_TOOLS,
+            "--tools", EDIT_TOOLS if _can_edit(task) else READ_ONLY_TOOLS,
             "--permission-prompts", "none",
             "--restricted", "--strict-mcp-config",
             "--max-budget-usd", str(self.max_budget_usd),
         ]  # fmt: skip
+        if _can_edit(task):
+            # Edits would otherwise prompt, and "--permission-prompts none" denies every prompt.
+            args += ["--permission-mode", "acceptEdits"]
         if worker.model is not None:
             args += ["--model", worker.model]
         if worker.persona:

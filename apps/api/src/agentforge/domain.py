@@ -1,4 +1,4 @@
-"""Immutable application contracts; filesystem and model references are descriptive."""
+"""Immutable application contracts."""
 
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -78,7 +78,10 @@ class WorkerResult(Contract):
     artifacts: tuple[str, ...] = ()
     passed_checks: tuple[str, ...] = ()
     satisfied_criteria: tuple[str, ...] = ()
-    session_id: str | None = None  # set by the executor, never by the model
+    # Set by executors, never by the model.
+    session_id: str | None = None
+    workspace: str | None = None  # the folder the work happened in, e.g. the task's worktree
+    diff: str = ""
 
 
 class ValidationReport(Contract):
