@@ -67,8 +67,8 @@ and the matching milestone doc, keeping implemented and planned behavior apart.
 ## Code map
 
 The code is a library, not a service: immutable contracts, a deterministic in-memory async
-scheduler, mock workers, a read-only Claude Code worker and editable agent personas, all in
-`apps/api/src/agentforge`. State is lost when the process exits.
+scheduler, mock workers, a Claude Code worker, Git worktrees, a command validator and editable
+agent personas, all in `apps/api/src/agentforge`. State is lost when the process exits.
 
 - **`domain.py`: contracts.** Every model extends `Contract` (Pydantic, `frozen=True`,
   `extra="forbid"`, `revalidate_instances="always"`); collections are tuples. `TaskSpec` is the
@@ -77,12 +77,13 @@ scheduler, mock workers, a read-only Claude Code worker and editable agent perso
   `model_copy(update=...)`, never mutated. `AgentConfig.model` (default `None` = runtime default)
   and `reasoning` (`low`…`max`) are read by the Claude Code executor; `permissions` is still
   descriptive. `AgentConfig.persona` (≤10,000 chars, the cap keeps the CLI argument under the
-  Windows command-line limit) is sent as `--append-system-prompt`. `WorkerResult.session_id` is
-  set by the executor, never by the model.
+  Windows command-line limit) is sent as `--append-system-prompt`. `WorkerResult.session_id`,
+  `workspace` and `diff` are set by executors, never by the model. `TaskSpec.allowed_operations`
+  containing `"edit"` is what lets a Claude Code worker edit files.
 - **`orchestration.py`: `Scheduler`.** Two `Protocol` seams are where workers and validators plug
   in: `WorkerExecutor.execute(Assignment) -> WorkerResult` (mock or Claude Code) and
-  `ResultValidator.validate(TaskSpec, WorkerResult) -> ValidationReport` (real validation is
-  planned for M3).
+  `ResultValidator.validate(TaskSpec, WorkerResult) -> ValidationReport` (mock or
+  `CommandValidator`).
   - `run(plan)` validates the whole DAG up front: unique IDs, matching `run_id`, known
     dependencies, registered roles, and acyclicity via Kahn's algorithm. Kahn's dependents map is
     kept as `_dependents` for blocking. It then loops `_dispatch()` → wait on `_wake` until every
@@ -115,13 +116,27 @@ scheduler, mock workers, a read-only Claude Code worker and editable agent perso
   `register_default_workers` registers `default_agents()`.
 - **`claude_code.py`: `ClaudeCodeExecutor`.** Runs one `claude -p --output-format stream-json`
   process per task in the task's `workspace_reference` folder, read-only (`--tools
-  Read,Glob,Grep --permission-prompts none --restricted --strict-mcp-config`), with the prompt
+  Read,Glob,Grep --permission-prompts none --restricted --strict-mcp-config`), or with
+  `Edit,Write` and `--permission-mode acceptEdits` added when the task allows `"edit"`. It
+  never gets a tool that runs commands. The prompt goes
   on stdin, a fresh `--session-id`, `--effort`/`--model` from `AgentConfig`, the persona as
   `--append-system-prompt`, the `WorkerResult` schema via `--json-schema`, and a
   `--max-budget-usd` cap. Every event goes to `on_event`; the final `result.structured_output`
   becomes the `WorkerResult`. An error result → `WORKER_FAILURE`, no result →
   `EXECUTOR_EXCEPTION`, and cancellation kills the process. The CLI is usually not on PATH: pass
   `command=(<path to the VS Code extension's claude.exe>,)`.
+- **`worktrees.py`: one checkout per task.** `create`, `diff` and `remove` are thin async
+  wrappers over `git`. `create` resolves the commit with `rev-parse --end-of-options` before
+  `worktree add --detach`, so a commit string can't act as a flag, and requires an absolute
+  path. `diff` stages everything in the worktree's own index and diffs it against `HEAD` with
+  external diff programs off, because worktree content is untrusted. `WorktreeExecutor(inner,
+  root)` wraps another executor: it creates `root/<run_id>/<task_id>` (ids limited to
+  `[A-Za-z0-9_-]+`), runs `inner` there and adds `workspace` and `diff` to the result. Worktrees
+  are kept, never reused, and not sandboxes.
+- **`validation.py`: `CommandValidator`.** Runs each `check:<name>` constraint as a configured
+  argv (no shell) in the result's workspace with a timeout. It rejects on a non-zero exit, a
+  timeout or an unknown check, and never reads the worker's `passed_checks`. Timeout and
+  cancellation kill the check process, but not its children.
 - **`personas.py`: editable agents.** One `<id>.md` per agent: flat `key: value` settings (`id`,
   `role`, `model`, `reasoning`) between `---` lines, then the persona text. It is parsed by hand
   (no YAML dependency) and read as `utf-8-sig`, because Windows editors may add a BOM. Ids are
@@ -140,6 +155,11 @@ Tests are in `apps/api/tests/`:
 - `test_personas.py`: the persona folder.
 - `test_claude_code.py`: the Claude Code executor. It uses `fake_claude.py`, which replays
   `fixtures/claude_stream.jsonl` (a trimmed live recording). Its live test is opt-in.
+- `test_worktrees.py`: worktrees and diffs in disposable Git repositories, plus a full
+  edit → diff → check run with the fake Claude.
+- `test_validation.py`: the command validator. Its `hanging` fixture is a check that reports
+  its pid over a local socket, a barrier for the timeout and cancellation tests.
 
-Delivered contracts and limits are in [M1-domain.md](docs/milestones/M1-domain.md) and
-[M2-claude-code.md](docs/milestones/M2-claude-code.md).
+Delivered contracts and limits are in [M1-domain.md](docs/milestones/M1-domain.md),
+[M2-claude-code.md](docs/milestones/M2-claude-code.md) and
+[M3-worktrees.md](docs/milestones/M3-worktrees.md).

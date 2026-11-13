@@ -3,7 +3,7 @@
 A local-first Windows platform where one lead agent coordinates specialized coding agents. It ships
 with five, and you can add, remove or fully customize any of them.
 
-**Status:** M1–M2 are implemented as a Python library. The desktop app, REST API, persistence and
+**Status:** M1–M3 are implemented as a Python library. The desktop app, REST API, persistence and
 the lead agent are planned, not built.
 
 ## What is AgentForge
@@ -19,8 +19,10 @@ What exists today is the core library (`apps/api/src/agentforge`):
 - **Contracts:** immutable task, worker, result and report models.
 - **Scheduler:** a deterministic, in-memory async scheduler that runs a task graph on up to five
   workers at once.
-- **Workers:** five mock workers for demos and tests, plus a read-only worker that runs the Claude
-  Code CLI.
+- **Workers:** five mock workers for demos and tests, plus a worker that runs the Claude Code
+  CLI. It is read-only unless a task allows edits, and it never runs commands.
+- **Worktrees:** each task can get its own Git worktree, and its diff is recorded.
+- **Validation:** a validator that runs your check commands, such as pytest, on the result.
 
 The mock demo and the offline tests need no account or API key. Real Claude Code workers use your
 logged-in Claude Code install.
@@ -31,8 +33,8 @@ logged-in Claude Code install.
   control, validation, permissions and human approval. Plain, testable code decides what runs
   next and when a task is done.
 - **Agent output isn't trusted.** Every result goes through an independent validator before a
-  task counts as completed. Today's validator only compares reported evidence; real checks
-  (running tests, reading diffs) are planned for M3.
+  task counts as completed. `CommandValidator` runs your check commands itself and ignores
+  what the worker says it checked.
 - **Local-first.** The scheduler, workers and state run on your machine, with no server to
   host. The Claude Code worker does send the files it reads to Claude, like any Claude Code
   session.
@@ -61,13 +63,16 @@ flowchart LR
   Independent branches keep running.
 - **Clean cancellation.** Cancelling a task or a run stops its work and waits for cleanup. For
   Claude Code this kills the CLI process.
-- **Read-only Claude Code worker.** Each task gets one `claude -p` process limited to the Read,
-  Glob and Grep tools, with a spending cap, a fresh session ID and a schema-checked result.
+- **Restricted Claude Code worker.** Each task gets one `claude -p` process limited to the Read,
+  Glob and Grep tools, with a spending cap, a fresh session ID and a schema-checked result. A
+  task that allows `"edit"` adds Edit and Write. No worker can run commands.
+- **One worktree per task.** Edits happen in a separate Git worktree, never in your checkout.
+  AgentForge records the diff with Git instead of asking the worker what it changed.
 - **Editable personas.** Each agent is one Markdown file: its settings plus a persona that the
   Claude Code worker adds to its system prompt. Setup gives you the five defaults, and you can
   edit, add or remove agents.
 
-State is lost when the process exits. What is built and what is planned (worktrees, persistence,
+State is lost when the process exits. What is built and what is planned (persistence,
 the lead agent, the API and the desktop app) is in [ROADMAP.md](ROADMAP.md).
 
 ## Prerequisites
@@ -146,10 +151,36 @@ asyncio.run(main())
 ```
 
 Each run is billed to your Claude Code login. Several M2 features are deliberately deferred, such
-as resume/retries (M4), edit permissions and worktrees (M3), and a per-task timeout. They are
-listed under "Not implemented yet" in [the M2 doc](docs/milestones/M2-claude-code.md).
+as resume/retries (M4) and a per-task timeout. They are listed under "Not implemented yet" in
+[the M2 doc](docs/milestones/M2-claude-code.md).
 
-### 4. Verify
+### 4. Let a worker edit code in a worktree
+
+Wrap the executor in `WorktreeExecutor`, allow `"edit"` on the task, and use `CommandValidator`
+to run real checks. Change these lines in the example above:
+
+```python
+from agentforge.validation import CommandValidator
+from agentforge.worktrees import WorktreeExecutor
+
+    scheduler = Scheduler(validator=CommandValidator(checks={"unit": ("python", "-m", "pytest")}))
+    worker = WorktreeExecutor(claude, root=r"C:\path\to\worktrees")  # share one for all agents
+    ...
+        scheduler.register_worker(agent, worker)
+    task = TaskSpec(id="t1", run_id="r1", title="Fix the failing test", role="backend",
+                    repository_reference=r"C:\path\to\some\repo",  # base_commit defaults to HEAD
+                    allowed_operations=("edit",), execution_constraints=("check:unit",))
+```
+
+The worker edits `C:\path\to\worktrees\r1\t1`, not your checkout. Afterwards
+`report.attempts[0].result.diff` holds the change, and the task completes only if pytest exits 0
+there. The worktree is kept; delete it with `agentforge.worktrees.remove(repo, path)`.
+
+Two things to know first. Checks run code the worker wrote, with your user rights: a worktree
+is not a sandbox. And edit mode has not been tried against the live CLI yet. Both are detailed
+in [the M3 doc](docs/milestones/M3-worktrees.md).
+
+### 5. Verify
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest apps/api/tests
@@ -204,3 +235,5 @@ app (M6), which will call these same functions.
   and acceptance checks.
 - [M2: Claude Code adapter](docs/milestones/M2-claude-code.md): executor contract, CLI flags,
   outcome mapping, the live check and deferred work.
+- [M3: worktrees and validation](docs/milestones/M3-worktrees.md): worktrees, edit mode, diffs,
+  check commands, risks and deferred work.

@@ -71,11 +71,11 @@ are supported.
 | Deferred | Waits for |
 |---|---|
 | Session resume and retries | M4 (retries, pause/resume). Session IDs are already recorded for it; the CLI's `--resume` is not used yet. |
-| Edit/execute permissions and worktrees | M3 (worktree management, restricted execution). Until then workers stay read-only. |
+| Edit permissions and worktrees | Done in [M3](M3-worktrees.md): a task can allow `"edit"`. Workers still cannot run commands. |
 | A per-task timeout | Later runtime work. For now `cancel_task` stops a stuck worker. |
 | A Claude Code mode for `python -m agentforge` | When wanted; the demo stays mock-only. |
 | Validating the `model` string | Not needed while arguments go straight to the executable with no shell. Revisit if a shell or remote runner is introduced. |
-| Using `AgentConfig.permissions` | M3, when permissions become real. It is still descriptive. |
+| Using `AgentConfig.permissions` | Still descriptive. M3 put edit rights on the task (`allowed_operations`) instead. |
 
 ## Acceptance checks
 
