@@ -3,10 +3,12 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
+from agentforge.__main__ import main as demo_main
 from agentforge.domain import (
     AgentConfig,
     FailureReason,
     RunPlan,
+    RunReport,
     TaskSpec,
     TaskStatus,
     WorkerResult,
@@ -158,6 +160,11 @@ async def test_validation_gates_diamond_and_records_transitions():
             FailureReason.EXECUTOR_EXCEPTION,
         ),
         (MockExecutor(result={"invalid": True}), MockValidator(), FailureReason.INVALID_RESULT),
+        (
+            MockExecutor(result=WorkerResult.model_construct(success="yes")),
+            MockValidator(),
+            FailureReason.INVALID_RESULT,
+        ),
         (MockExecutor(), MockValidator(reject=True), FailureReason.VALIDATION_REJECTED),
         (
             MockExecutor(),
@@ -409,3 +416,82 @@ async def test_late_success_cannot_override_cancellation():
     assert report.tasks[0].status == TaskStatus.CANCELLED
     assert report.attempts[0].result is None
     assert all(worker.task_id is None for worker in report.workers)
+
+
+async def test_non_exception_error_fails_task_instead_of_hanging():
+    class Abort(BaseException):
+        pass
+
+    class Executor:
+        async def execute(self, assignment):
+            if assignment.task.id == "a":
+                raise Abort
+            return WorkerResult(success=True)
+
+    engine = scheduler(Executor())
+    report = await asyncio.wait_for(engine.run(plan(task("a"), task("z"))), 2)
+    states = {t.task.id: t for t in report.tasks}
+    assert states["a"].status == TaskStatus.FAILED
+    assert states["a"].failure_reason == FailureReason.EXECUTOR_EXCEPTION
+    assert states["z"].status == TaskStatus.COMPLETED
+    assert all(worker.task_id is None for worker in report.workers)
+
+
+async def test_second_run_cancellation_does_not_interrupt_cleanup_or_overlap_runs():
+    started, cleaning, release, done = (asyncio.Event() for _ in range(4))
+    interrupted = []
+
+    class Executor:
+        async def execute(self, assignment):
+            if assignment.task.id == "next":
+                return WorkerResult(success=True)
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    interrupted.append(True)
+                    raise
+                finally:
+                    done.set()
+
+    engine = scheduler(Executor())
+    running = asyncio.create_task(engine.run(plan(task("a"))))
+    await asyncio.wait_for(started.wait(), 2)
+    running.cancel()
+    await asyncio.wait_for(cleaning.wait(), 2)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    assert not interrupted
+    with pytest.raises(ValueError):
+        await engine.run(plan(task("next")))
+    release.set()
+    await asyncio.wait_for(done.wait(), 2)
+    assert not interrupted
+    report = await asyncio.wait_for(engine.run(plan(task("next"))), 2)
+    assert report.successful
+
+
+async def test_cancel_before_task_coroutine_starts_releases_worker():
+    executor = MockExecutor()
+    engine = scheduler(executor)
+    running = asyncio.create_task(engine.run(plan(task("a"))))
+    await asyncio.sleep(0)  # run() dispatches "a"; its coroutine has not taken a step yet
+    assert engine.snapshot().tasks[0].status == TaskStatus.ASSIGNED
+    await engine.cancel_task("a")
+    report = await asyncio.wait_for(running, 2)
+    assert report.tasks[0].status == TaskStatus.CANCELLED
+    assert not executor.assignments
+    assert all(worker.task_id is None for worker in report.workers)
+
+
+async def test_demo_completes_all_five_tasks(capsys):
+    await asyncio.wait_for(demo_main(), 2)
+    banner, report = capsys.readouterr().out.split("\n", 1)
+    assert banner == "All five mock workers are executing concurrently."
+    report = RunReport.model_validate_json(report)
+    assert report.successful and len(report.tasks) == 5
