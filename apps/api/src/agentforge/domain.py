@@ -9,7 +9,8 @@ Identifier = Annotated[str, Field(min_length=1, pattern=r"\S")]
 
 
 class Contract(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # Revalidation rejects instances built with model_construct or otherwise bypassing checks.
+    model_config = ConfigDict(frozen=True, extra="forbid", revalidate_instances="always")
 
 
 class TaskStatus(StrEnum):
