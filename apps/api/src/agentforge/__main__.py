@@ -1,10 +1,12 @@
-"""Run the five-worker mock demonstration: python -m agentforge."""
+"""python -m agentforge: the five-worker mock demo; `setup` creates the persona folder."""
 
 import asyncio
+import sys
 
 from agentforge.domain import RunPlan, TaskSpec, WorkerResult
 from agentforge.mocks import DEFAULT_ROLES, MockExecutor, MockValidator, register_default_workers
 from agentforge.orchestration import Scheduler
+from agentforge.personas import default_folder, setup
 
 
 async def main() -> None:
@@ -54,4 +56,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    if sys.argv[1:] == ["setup"]:
+        print(f"Agent personas are in {setup(default_folder())}")
+    elif sys.argv[1:]:
+        sys.exit("usage: python -m agentforge [setup]")
+    else:
+        asyncio.run(main())
