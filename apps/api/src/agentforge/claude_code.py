@@ -89,6 +89,8 @@ class ClaudeCodeExecutor:
         ]  # fmt: skip
         if worker.model is not None:
             args += ["--model", worker.model]
+        if worker.persona:
+            args += ["--append-system-prompt", worker.persona]
         proc = await asyncio.create_subprocess_exec(
             program, *args, cwd=workspace, stdin=PIPE, stdout=PIPE, stderr=PIPE, limit=STREAM_LIMIT
         )

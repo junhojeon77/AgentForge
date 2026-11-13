@@ -76,7 +76,13 @@ def is_running(pid):
 
 async def test_runs_read_only_claude_and_returns_structured_result(workspace):
     events = []
-    worker = AgentConfig(id="w", role="backend", model="claude-sonnet-5-5", reasoning="high")
+    worker = AgentConfig(
+        id="w",
+        role="backend",
+        model="claude-sonnet-5-5",
+        reasoning="high",
+        persona="You are the backend engineer.\nReport facts only.",
+    )
     claude = executor(on_event=lambda task_id, event: events.append((task_id, event["type"])))
     result = await claude.execute(Assignment(task=task(workspace), worker=worker))
 
@@ -93,6 +99,7 @@ async def test_runs_read_only_claude_and_returns_structured_result(workspace):
     )
     assert flag(argv, "--model") == "claude-sonnet-5-5"
     assert flag(argv, "--effort") == "high"
+    assert flag(argv, "--append-system-prompt") == worker.persona
     assert flag(argv, "--output-format") == "stream-json"
     assert flag(argv, "--tools") == "Read,Glob,Grep"
     assert flag(argv, "--permission-prompts") == "none"
@@ -116,6 +123,7 @@ async def test_error_result_is_a_worker_failure_with_session(workspace, monkeypa
     assert "error_max_budget_usd" in state.message
     assert attempt.result.session_id == flag(fake_call(workspace)["argv"], "--session-id")
     assert "--model" not in fake_call(workspace)["argv"]  # unset model: CLI default
+    assert "--append-system-prompt" not in fake_call(workspace)["argv"]  # empty persona
 
 
 async def test_exit_without_result_is_an_executor_exception(workspace, monkeypatch):
