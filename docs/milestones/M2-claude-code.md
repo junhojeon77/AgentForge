@@ -17,13 +17,17 @@ M2 originally named a Codex adapter on the roadmap. It was switched to Claude Co
 | `ClaudeCodeExecutor(command=("claude",), max_budget_usd=1.0, on_event=None)` | `command` is the program prefix; pass the full path to `claude.exe` when it is not on PATH |
 | `AgentConfig.model` | Passed as `--model`; `None` (the new default) lets Claude Code choose |
 | `AgentConfig.reasoning` | Passed as `--effort`; must be `low`, `medium`, `high`, `xhigh` or `max` |
+| `AgentConfig.persona` | Passed as `--append-system-prompt` when not empty (max 10,000 characters); loaded from the persona folder by `agentforge.personas` |
 | `TaskSpec.workspace_reference` | Required existing folder; becomes the process working directory |
 | `WorkerResult.session_id` | A fresh UUID per task, passed as `--session-id` and set on every result |
 | `on_event(task_id, event)` | Receives every raw stream-json event (dict) as it arrives |
 
 Flags used on every call: `-p --output-format stream-json --verbose --json-schema <schema>
 --session-id <uuid> --effort <level> --tools Read,Glob,Grep --permission-prompts none --restricted
---strict-mcp-config --max-budget-usd <n>`, plus `--model` when set. The prompt is written to stdin.
+--strict-mcp-config --max-budget-usd <n>`, plus `--model` and `--append-system-prompt` when set.
+The prompt is written to stdin. Per the CLI 2.1.323 `--help`, `--restricted` also confines the file
+tools to the working directory, so workers can't read outside the task's workspace. This comes
+from the help text only; no live test checks it.
 The JSON schema is `WorkerResult`'s schema without `session_id`, with every field required.
 
 Outcome mapping:
