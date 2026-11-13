@@ -48,6 +48,13 @@ def test_agent_model_defaults_to_runtime_choice_and_effort_is_validated():
         AgentConfig(id="a", role="backend", reasoning="extreme")
 
 
+def test_agent_persona_is_optional_and_capped():
+    assert AgentConfig(id="a", role="backend").persona == ""
+    assert len(AgentConfig(id="a", role="backend", persona="x" * 10_000).persona) == 10_000
+    with pytest.raises(ValidationError):
+        AgentConfig(id="a", role="backend", persona="x" * 10_001)
+
+
 def test_worker_result_session_id_is_optional():
     assert WorkerResult(success=True).session_id is None
     assert WorkerResult(success=True, session_id="s").session_id == "s"

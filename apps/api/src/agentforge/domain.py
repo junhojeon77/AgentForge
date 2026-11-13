@@ -45,6 +45,8 @@ class AgentConfig(Contract):
     model: str | None = None  # None: the runtime's default model
     reasoning: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     permissions: tuple[str, ...] = ()
+    # Sent as a CLI argument; the cap keeps it far below Windows' 32,767-character command line.
+    persona: str = Field("", max_length=10_000)
 
 
 class TaskSpec(Contract):
