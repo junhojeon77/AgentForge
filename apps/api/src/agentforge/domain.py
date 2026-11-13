@@ -1,7 +1,7 @@
 """Immutable application contracts; filesystem and model references are descriptive."""
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
@@ -42,8 +42,8 @@ class FailureReason(StrEnum):
 class AgentConfig(Contract):
     id: Identifier
     role: Identifier
-    model: str = "mock"
-    reasoning: str = "medium"
+    model: str | None = None  # None: the runtime's default model
+    reasoning: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     permissions: tuple[str, ...] = ()
 
 
@@ -76,6 +76,7 @@ class WorkerResult(Contract):
     artifacts: tuple[str, ...] = ()
     passed_checks: tuple[str, ...] = ()
     satisfied_criteria: tuple[str, ...] = ()
+    session_id: str | None = None  # set by the executor, never by the model
 
 
 class ValidationReport(Contract):
