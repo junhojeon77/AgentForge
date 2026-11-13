@@ -14,8 +14,9 @@ references, and workspace references are descriptive configuration only.
 
 ## Public contracts
 
-All Pydantic contracts reject unknown fields and are frozen. Collections are tuples. Reports and
-snapshots are deep copies, so callers cannot change scheduler state through them.
+All Pydantic contracts reject unknown fields, are frozen, and revalidate model instances (including
+ones built with `model_construct`). Collections are tuples. Reports and snapshots are freshly built
+frozen objects, so callers cannot change scheduler state through them.
 
 `TaskSpec` contains `id`, `run_id`, `title`, `description`, `objective`, `role`, numeric `priority`,
 `dependencies`, `repository_reference`, `base_commit`, optional `workspace_reference`,
@@ -43,7 +44,9 @@ Executors receive an immutable `Assignment` containing the task, worker, and att
 `WorkerResult` records success, message, artifact references, passed checks, and satisfied criteria.
 `ValidationReport` records acceptance and explanatory issues. An invalid worker result is a failure;
 invalid validator output is a validator failure. Exceptions become task failures while independent
-work continues. Task failure does not raise from `run`; graph/contract errors do.
+work continues. An error outside `Exception` (a bare `BaseException` subclass) still fails the task
+as an executor or validator exception instead of leaving it running. Task failure does not raise
+from `run`; graph/contract errors do.
 
 `RunReport.successful` is true only when every task completed, including an empty successful plan.
 Each attempt stores its result, validation, final status, and failure reason. Transitions have a
@@ -80,6 +83,8 @@ descendants become blocked. Run cancellation stops future dispatch and cancels u
 preserving existing terminal outcomes. The first terminal transition wins, so late success cannot
 overwrite cancellation. Repeated cancellation awaits ongoing cleanup without cancelling it again.
 Cancelling the coroutine running `run` also awaits worker cleanup before propagating cancellation.
+Cancelling it again stops `run` from waiting but does not interrupt that cleanup, and a new `run` is
+refused with `ValueError` until the cleanup finishes.
 
 Executors and validators must cooperate with asyncio cancellation. Cleanup that never finishes can
 keep cancellation waiting; forced process termination and timeouts are future runtime concerns. Use
@@ -98,9 +103,12 @@ Run the pytest and Ruff commands in the root README. Tests cover:
 - Duplicate task IDs, inconsistent runs, missing dependencies, self-cycles, and multi-task cycles.
 - Five simultaneous workers, reduced concurrency, same-role serialization, ordering, and worker reuse.
 - Chains and diamond graphs with validation-gated dependencies and no duplicate dispatch.
-- Failed/malformed results, exceptions, rejected evidence, worker release, and independent branches.
-- Pending/executing/validating cancellation, repeated cleanup, cancellation races, and caller cancellation.
+- Failed/malformed results (including `model_construct` bypasses), exceptions, non-`Exception`
+  errors, rejected evidence, worker release, and independent branches.
+- Pending/executing/validating cancellation, cancellation before a task coroutine starts, repeated
+  cleanup, cancellation races, and single and repeated caller cancellation.
 - Worker reassignment during cancellation cleanup, complete transition history, and empty plans.
+- A smoke test of the `python -m agentforge` demonstration.
 
 The executable `python -m agentforge` demonstrates all five workers concurrently with validated mock
 evidence. No real commands, model calls, repository writes, SQLite database, FastAPI server, LangGraph
