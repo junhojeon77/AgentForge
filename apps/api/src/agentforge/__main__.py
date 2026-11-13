@@ -11,7 +11,7 @@ async def main() -> None:
     gate = asyncio.Event()
     executor = MockExecutor(
         gate=gate,
-        expected_starts=5,
+        expected_starts=len(DEFAULT_ROLES),
         result=WorkerResult(
             success=True,
             artifacts=("mock-artifact",),
@@ -37,16 +37,20 @@ async def main() -> None:
         ),
     )
     running = asyncio.create_task(scheduler.run(plan))
+    started = asyncio.create_task(executor.started.wait())
     try:
-        await executor.started.wait()
-        print("All five mock workers are executing concurrently.")
+        # A run that fails before all workers start must surface its error, not hang.
+        await asyncio.wait({running, started}, return_when=asyncio.FIRST_COMPLETED)
+        if started.done():
+            print("All five mock workers are executing concurrently.")
         gate.set()
         report = await running
         print(report.model_dump_json(indent=2))
     finally:
-        if not running.done():
-            running.cancel()
-            await asyncio.gather(running, return_exceptions=True)
+        for future in (running, started):
+            if not future.done():
+                future.cancel()
+        await asyncio.gather(running, started, return_exceptions=True)
 
 
 if __name__ == "__main__":
