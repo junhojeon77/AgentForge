@@ -47,6 +47,7 @@ class Scheduler:
         self._workers: dict[str, WorkerState] = {}
         self._executors: dict[str, WorkerExecutor] = {}
         self._states: dict[str, TaskState] = {}
+        self._dependents: dict[str, list[str]] = {}
         self._attempts: dict[str, TaskAttempt] = {}
         self._transitions: list[Transition] = []
         self._active: dict[str, asyncio.Task[None]] = {}
@@ -57,7 +58,7 @@ class Scheduler:
     def register_worker(self, agent: AgentConfig, executor: WorkerExecutor) -> None:
         if self._running:
             raise ValueError("workers cannot be registered during a run")
-        agent = AgentConfig.model_validate(agent.model_dump())
+        agent = AgentConfig.model_validate(agent)
         if agent.id in self._workers:
             raise ValueError(f"duplicate worker: {agent.id}")
         self._workers[agent.id] = WorkerState(agent=agent)
@@ -70,10 +71,10 @@ class Scheduler:
             workers=tuple(self._workers[key] for key in sorted(self._workers)),
             attempts=tuple(self._attempts.values()),
             transitions=tuple(self._transitions),
-        ).model_copy(deep=True)
+        )
 
-    def _validate_plan(self, plan: RunPlan) -> RunPlan:
-        plan = RunPlan.model_validate(plan.model_dump())
+    def _validate_plan(self, plan: RunPlan) -> tuple[RunPlan, dict[str, list[str]]]:
+        plan = RunPlan.model_validate(plan)
         tasks = {task.id: task for task in plan.tasks}
         if len(tasks) != len(plan.tasks):
             raise ValueError("duplicate task ID")
@@ -102,12 +103,12 @@ class Scheduler:
                     ready.append(dependent)
         if visited != len(tasks):
             raise ValueError("cyclic task dependencies")
-        return plan
+        return plan, dependents
 
     async def run(self, plan: RunPlan) -> RunReport:
-        if self._running:
+        if self._running or self._active:
             raise ValueError("a run is already active")
-        plan = self._validate_plan(plan)
+        plan, self._dependents = self._validate_plan(plan)
         self._running = True
         self._run_id = plan.id
         self._states = {task.id: TaskState(task=task) for task in plan.tasks}
@@ -124,7 +125,8 @@ class Scheduler:
                     return self.snapshot()
                 await self._wake.wait()
         except BaseException:
-            await self.cancel_run()
+            # Shielded so a repeated caller cancellation cannot interrupt worker cleanup.
+            await asyncio.shield(self.cancel_run())
             raise
         finally:
             self._running = False
@@ -193,9 +195,7 @@ class Scheduler:
             if self._states[task_id].status in TERMINAL:
                 return
             try:
-                result = WorkerResult.model_validate(
-                    raw_result.model_dump() if isinstance(raw_result, WorkerResult) else raw_result
-                )
+                result = WorkerResult.model_validate(raw_result)
             except (ValidationError, TypeError, ValueError):
                 self._fail(task_id, FailureReason.INVALID_RESULT, "invalid worker result")
                 return
@@ -206,11 +206,7 @@ class Scheduler:
             self._transition(task_id, TaskStatus.VALIDATING)
             try:
                 raw_validation = await self._validator.validate(assignment.task, result)
-                validation = ValidationReport.model_validate(
-                    raw_validation.model_dump()
-                    if isinstance(raw_validation, ValidationReport)
-                    else raw_validation
-                )
+                validation = ValidationReport.model_validate(raw_validation)
             except Exception as error:
                 self._fail(task_id, FailureReason.VALIDATOR_EXCEPTION, str(error))
                 return
@@ -228,6 +224,14 @@ class Scheduler:
                 self._block_descendants(task_id)
             raise
         finally:
+            # No-op after a terminal outcome; catches BaseExceptions that bypass the handlers.
+            validating = self._states[task_id].status == TaskStatus.VALIDATING
+            reason = (
+                FailureReason.VALIDATOR_EXCEPTION
+                if validating
+                else FailureReason.EXECUTOR_EXCEPTION
+            )
+            self._fail(task_id, reason, "worker stopped unexpectedly")
             self._workers[worker_id] = self._workers[worker_id].model_copy(update={"task_id": None})
             self._active.pop(task_id, None)
             self._wake.set()
@@ -239,11 +243,8 @@ class Scheduler:
     def _block_descendants(self, origin: str) -> None:
         queue = [origin]
         while queue:
-            dependency = queue.pop()
-            for task_id, state in self._states.items():
-                if dependency in state.task.dependencies and self._transition(
-                    task_id, TaskStatus.BLOCKED, blocked_by=origin
-                ):
+            for task_id in self._dependents[queue.pop()]:
+                if self._transition(task_id, TaskStatus.BLOCKED, blocked_by=origin):
                     queue.append(task_id)
 
     async def cancel_task(self, task_id: str) -> None:
