@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from agentforge.domain import AgentConfig, TaskSpec
+from agentforge.domain import AgentConfig, TaskSpec, WorkerResult
 
 
 def test_task_spec_preserves_contract_and_is_immutable():
@@ -37,3 +37,17 @@ def test_invalid_task_contract(values):
 
 def test_agent_roles_are_extensible():
     assert AgentConfig(id="custom", role="security").role == "security"
+
+
+def test_agent_model_defaults_to_runtime_choice_and_effort_is_validated():
+    agent = AgentConfig(id="a", role="backend")
+    assert agent.model is None
+    assert agent.reasoning == "medium"
+    assert AgentConfig(id="a", role="backend", reasoning="xhigh").reasoning == "xhigh"
+    with pytest.raises(ValidationError):
+        AgentConfig(id="a", role="backend", reasoning="extreme")
+
+
+def test_worker_result_session_id_is_optional():
+    assert WorkerResult(success=True).session_id is None
+    assert WorkerResult(success=True, session_id="s").session_id == "s"
