@@ -1,0 +1,171 @@
+import asyncio
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import uuid
+
+import pytest
+
+from agentforge.claude_code import ClaudeCodeExecutor
+from agentforge.domain import (
+    AgentConfig,
+    Assignment,
+    FailureReason,
+    RunPlan,
+    TaskSpec,
+    TaskStatus,
+    WorkerResult,
+)
+from agentforge.mocks import MockValidator
+from agentforge.orchestration import Scheduler
+
+FAKE_CLAUDE = pathlib.Path(__file__).parent / "fake_claude.py"
+
+
+@pytest.fixture
+def workspace(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "call.json"))
+    path = tmp_path / "workspace"
+    path.mkdir()
+    return path
+
+
+def fake_call(workspace):
+    return json.loads((workspace.parent / "call.json").read_text(encoding="utf-8"))
+
+
+def flag(argv, name):
+    return argv[argv.index(name) + 1]
+
+
+def executor(**kwargs):
+    return ClaudeCodeExecutor(command=(sys.executable, str(FAKE_CLAUDE)), **kwargs)
+
+
+def task(workspace):
+    return TaskSpec(
+        id="a",
+        run_id="run",
+        title="Read the file",
+        role="backend",
+        workspace_reference=None if workspace is None else str(workspace),
+        acceptance_criteria=("read hello.txt",),
+    )
+
+
+async def run_one(workspace, claude=None):
+    engine = Scheduler(validator=MockValidator())
+    engine.register_worker(AgentConfig(id="w", role="backend"), claude or executor())
+    return await asyncio.wait_for(engine.run(RunPlan(id="run", tasks=(task(workspace),))), 5)
+
+
+def is_running(pid):
+    if sys.platform == "win32":
+        listing = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True
+        ).stdout
+        return str(pid) in listing
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+async def test_runs_read_only_claude_and_returns_structured_result(workspace):
+    events = []
+    worker = AgentConfig(id="w", role="backend", model="claude-sonnet-5-5", reasoning="high")
+    claude = executor(on_event=lambda task_id, event: events.append((task_id, event["type"])))
+    result = await claude.execute(Assignment(task=task(workspace), worker=worker))
+
+    call = fake_call(workspace)
+    argv = call["argv"]
+    session_id = flag(argv, "--session-id")
+    uuid.UUID(session_id)
+    assert result == WorkerResult(
+        success=True,
+        message="pineapple",
+        artifacts=("hello.txt",),
+        satisfied_criteria=("read hello.txt",),
+        session_id=session_id,
+    )
+    assert flag(argv, "--model") == "claude-sonnet-5-5"
+    assert flag(argv, "--effort") == "high"
+    assert flag(argv, "--output-format") == "stream-json"
+    assert flag(argv, "--tools") == "Read,Glob,Grep"
+    assert flag(argv, "--permission-prompts") == "none"
+    assert flag(argv, "--max-budget-usd") == "1.0"
+    assert {"-p", "--verbose", "--restricted", "--strict-mcp-config"} <= set(argv)
+    schema = json.loads(flag(argv, "--json-schema"))
+    assert "session_id" not in schema["properties"]
+    assert set(schema["required"]) == set(schema["properties"])
+    assert pathlib.Path(call["cwd"]).samefile(workspace)  # noqa: ASYNC240
+    assert "Read the file" in call["stdin"] and "read hello.txt" in call["stdin"]
+    assert [task_id for task_id, _ in events] == ["a"] * 7
+    assert events[0][1] == "system" and events[-1][1] == "result"
+
+
+async def test_error_result_is_a_worker_failure_with_session(workspace, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "error_result")
+    report = await run_one(workspace)
+    state, attempt = report.tasks[0], report.attempts[0]
+    assert state.status == TaskStatus.FAILED
+    assert state.failure_reason == FailureReason.WORKER_FAILURE
+    assert "error_max_budget_usd" in state.message
+    assert attempt.result.session_id == flag(fake_call(workspace)["argv"], "--session-id")
+    assert "--model" not in fake_call(workspace)["argv"]  # unset model: CLI default
+
+
+async def test_exit_without_result_is_an_executor_exception(workspace, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "crash")
+    state = (await run_one(workspace)).tasks[0]
+    assert state.failure_reason == FailureReason.EXECUTOR_EXCEPTION
+    assert "exited 1" in state.message and "fatal: not logged in" in state.message
+
+
+async def test_cancel_kills_the_claude_process(workspace, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "hang")
+    started = asyncio.Event()
+    claude = executor(on_event=lambda task_id, event: started.set())
+    engine = Scheduler(validator=MockValidator())
+    engine.register_worker(AgentConfig(id="w", role="backend"), claude)
+    running = asyncio.create_task(engine.run(RunPlan(id="run", tasks=(task(workspace),))))
+    await asyncio.wait_for(started.wait(), 5)
+    await asyncio.wait_for(engine.cancel_task("a"), 5)
+    report = await asyncio.wait_for(running, 5)
+    assert report.tasks[0].status == TaskStatus.CANCELLED
+    assert not is_running(fake_call(workspace)["pid"])
+
+
+async def test_workspace_must_be_an_existing_folder(tmp_path):
+    for workspace in (None, tmp_path / "missing"):
+        with pytest.raises(ValueError, match="workspace"):
+            await executor().execute(
+                Assignment(task=task(workspace), worker=AgentConfig(id="w", role="backend"))
+            )
+
+
+async def test_missing_executable_names_the_fix(tmp_path):
+    claude = ClaudeCodeExecutor(command=("agentforge-no-such-claude",))
+    with pytest.raises(FileNotFoundError, match="claude.exe"):
+        await claude.execute(Assignment(task=task(tmp_path), worker=AgentConfig(id="w", role="b")))
+
+
+@pytest.mark.skipif(
+    os.environ.get("AGENTFORGE_LIVE_CLAUDE") != "1",
+    reason="live call: set AGENTFORGE_LIVE_CLAUDE=1 and AGENTFORGE_CLAUDE=<claude path>",
+)
+async def test_live_claude_code_reads_the_workspace(tmp_path):
+    (tmp_path / "hello.txt").write_text("The secret word is: pineapple\n", encoding="utf-8")
+    claude = ClaudeCodeExecutor(
+        command=(os.environ.get("AGENTFORGE_CLAUDE", "claude"),), max_budget_usd=0.5
+    )
+    live_task = task(tmp_path).model_copy(
+        update={"objective": "Read hello.txt and put the secret word in message."}
+    )
+    worker = AgentConfig(id="w", role="backend", reasoning="low")
+    result = await claude.execute(Assignment(task=live_task, worker=worker))
+    assert result.success and "pineapple" in result.message
+    uuid.UUID(result.session_id)
