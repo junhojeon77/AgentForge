@@ -1,21 +1,83 @@
 # AgentForge
 
-AgentForge is a planned Windows desktop platform for coordinating software development agents.
-M1 implements its Python domain contracts and deterministic, in-memory task scheduler with five mock
-workers. M2 adds a read-only worker that runs the Claude Code CLI. The mock demo and the offline
-tests need no account or API key; real Claude Code workers use your logged-in Claude Code install.
+A local-first Windows platform where one lead agent coordinates five specialized coding agents.
 
-## Contributing guidance
+**Status:** M1–M2 are implemented as a Python library. The desktop app, REST API, persistence and
+the lead agent are planned, not built.
 
-[CLAUDE.md](CLAUDE.md) is the single project guide for contributors and Claude Code: working
-approach, roadmap and its limits, guidance for planned components, the TDD workflow, definition of
-done, commit rules, commands and an architecture summary. It replaced the former `AGENTS.md`,
-whose Codex/GPT routing rules no longer apply. Update both this README and CLAUDE.md with each
-task, keeping explanations proportional and distinguishing implemented behavior from future work.
+## What is AgentForge
 
-## Setup on Windows
+AgentForge is a planned Windows desktop platform for coordinating software development agents. A
+lead agent breaks a request into tasks, and five specialized workers (backend, frontend, database,
+QA and integration) carry them out under deterministic control and human approval.
 
-Use Python 3.11 or newer. From this directory in PowerShell:
+What exists today is the core library (`apps/api/src/agentforge`):
+
+- **Contracts:** immutable task, worker, result and report models.
+- **Scheduler:** a deterministic, in-memory async scheduler that runs a task graph on up to five
+  workers at once.
+- **Workers:** five mock workers for demos and tests, plus a read-only worker that runs the Claude
+  Code CLI.
+
+The mock demo and the offline tests need no account or API key. Real Claude Code workers use your
+logged-in Claude Code install.
+
+## Why AgentForge
+
+- **The model doesn't control the run.** AI reasoning is kept apart from scheduling, execution
+  control, validation, permissions and human approval. Plain, testable code decides what runs
+  next and when a task is done.
+- **Agent output isn't trusted.** Every result goes through an independent validator before a
+  task counts as completed. Today's validator only compares reported evidence; real checks
+  (running tests, reading diffs) are planned for M3.
+- **Local-first.** The scheduler, workers and state run on your machine, with no server to
+  host. The Claude Code worker does send the files it reads to Claude, like any Claude Code
+  session.
+- **Replaceable workers.** Every worker sits behind one small interface, so a mock, Claude Code
+  or a future runtime can be swapped without touching the scheduler.
+
+## Core design
+
+```mermaid
+flowchart LR
+    Plan[RunPlan<br/>tasks + dependencies] --> Scheduler
+    Scheduler -->|Assignment| Executor[WorkerExecutor<br/>Mock or Claude Code]
+    Executor -->|WorkerResult| Validator[ResultValidator]
+    Validator -->|ValidationReport| Scheduler
+    Scheduler --> Report[RunReport]
+```
+
+- **Immutable contracts.** Every model is a frozen Pydantic object that rejects unknown fields.
+  The scheduler records progress by replacing values, never by changing them in place.
+- **The whole graph is checked first.** Before anything runs, `run()` checks for unique IDs,
+  known dependencies, registered roles and cycles. A bad plan raises an error; a failed task is
+  reported in the `RunReport` instead.
+- **Deterministic dispatch.** Ready tasks run by priority, then by ID, on the matching role's
+  free worker. `max_concurrency` is 1–5 (default 5).
+- **Failure stays local.** A failed or cancelled task blocks only the tasks that depend on it.
+  Independent branches keep running.
+- **Clean cancellation.** Cancelling a task or a run stops its work and waits for cleanup. For
+  Claude Code this kills the CLI process.
+- **Read-only Claude Code worker.** Each task gets one `claude -p` process limited to the Read,
+  Glob and Grep tools, with a spending cap, a fresh session ID and a schema-checked result.
+- **Editable personas.** Each agent is one Markdown file: its settings plus a persona that the
+  Claude Code worker adds to its system prompt. Setup gives you the five defaults, and you can
+  edit, add or remove agents.
+
+State is lost when the process exits. What is built and what is planned (worktrees, persistence,
+the lead agent, the API and the desktop app) is in [ROADMAP.md](ROADMAP.md).
+
+## Prerequisites
+
+- Windows with PowerShell
+- Python 3.11 or newer
+- Git, to clone the repository
+- For real (non-mock) workers only: Claude Code installed and logged in. The VS Code extension
+  bundles `claude.exe`.
+
+## Install
+
+From the repository root in PowerShell:
 
 ```powershell
 python -m venv .venv
@@ -25,7 +87,9 @@ python -m venv .venv
 Installation requires package access. Virtual-environment activation is optional when using the
 explicit interpreter paths above. Build/runtime/dev dependency ranges are in `apps/api/pyproject.toml`.
 
-## Run the mock demonstration
+## Quick start
+
+### 1. Run the mock demo
 
 ```powershell
 .\.venv\Scripts\python.exe -m agentforge
@@ -35,21 +99,32 @@ The example waits until all five mock workers are executing, releases them toget
 mock evidence, and prints the execution report as JSON. It does not execute commands or modify a
 repository.
 
-## Run a Claude Code worker
+### 2. Set up the agents
+
+```powershell
+.\.venv\Scripts\python.exe -m agentforge setup
+```
+
+This creates `%APPDATA%\AgentForge\agents` with the five default personas and prints the path.
+Running it again never overwrites your edits. See [Agents and personas](#agents-and-personas).
+
+### 3. Run Claude Code workers
 
 `ClaudeCodeExecutor` runs one `claude -p` process per task in the task's workspace folder. Workers
 are **read-only**: they can read, search and list files, but not edit files or run commands. Each
 task gets a fresh session ID and a spending cap (`max_budget_usd`, default $1). Claude Code ships
-with the VS Code extension but is not on PATH, so pass the full path:
+with the VS Code extension but is not on PATH, so pass the full path. This example registers every
+agent from your persona folder:
 
 ```python
 import asyncio
 from pathlib import Path
 
 from agentforge.claude_code import ClaudeCodeExecutor
-from agentforge.domain import AgentConfig, RunPlan, TaskSpec
+from agentforge.domain import RunPlan, TaskSpec
 from agentforge.mocks import MockValidator
 from agentforge.orchestration import Scheduler
+from agentforge.personas import default_folder, load_agents
 
 CLAUDE = Path.home() / (
     r".vscode\extensions\anthropic.claude-code-2.1.323-win32-x64\resources\native-binary\claude.exe"
@@ -57,10 +132,9 @@ CLAUDE = Path.home() / (
 
 async def main():
     scheduler = Scheduler(validator=MockValidator())
-    scheduler.register_worker(
-        AgentConfig(id="reviewer", role="qa", reasoning="low"),  # model=None: Claude Code's default
-        ClaudeCodeExecutor(command=(str(CLAUDE),), on_event=lambda task_id, e: print(task_id, e["type"])),
-    )
+    claude = ClaudeCodeExecutor(command=(str(CLAUDE),), on_event=lambda task_id, e: print(task_id, e["type"]))
+    for agent in load_agents(default_folder()):  # each agent's persona becomes its system prompt
+        scheduler.register_worker(agent, claude)
     task = TaskSpec(id="t1", run_id="r1", title="Summarize the README", role="qa",
                     workspace_reference=r"C:\path\to\some\project")
     print((await scheduler.run(RunPlan(id="r1", tasks=(task,)))).model_dump_json(indent=2))
@@ -72,7 +146,7 @@ Each run is billed to your Claude Code login. Several M2 features are deliberate
 as resume/retries (M4), edit permissions and worktrees (M3), and a per-task timeout. They are
 listed under "Not implemented yet" in [the M2 doc](docs/milestones/M2-claude-code.md).
 
-## Verify
+### 4. Verify
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest apps/api/tests
@@ -80,27 +154,50 @@ listed under "Not implemented yet" in [the M2 doc](docs/milestones/M2-claude-cod
 .\.venv\Scripts\python.exe -m ruff format --check apps/api
 ```
 
-Verified on 2026-11-13 after M2, using the commands above and the mock demonstration: **48 tests
-passed and 1 skipped** (the opt-in live Claude Code test), Ruff lint passed, and all ten Python
-files passed the formatting check. The demo confirmed five completed tasks and all five workers
-released. Separately, one approved live `claude -p` call (Claude Code 2.1.323, $0.053) confirmed
-the flags and event format the M2 executor relies on; see [the M2 doc](docs/milestones/M2-claude-code.md).
-The opt-in live test itself has not been run. The command is in CLAUDE.md.
+## Agents and personas
 
-Earlier on 2026-11-13, an M1 audit round fixed the following:
-- A worker raising a non-`Exception` error no longer leaves `run()` waiting forever.
-- Cancelling `run()` twice no longer interrupts worker cleanup or lets a new run overlap the old one.
-- The demo surfaces an early run failure instead of hanging.
-- The scheduler drops redundant copies and re-scans.
+Each agent is one Markdown file named after its id, such as `backend.md`. Settings go between the
+two `---` lines, and the persona text follows:
 
-That round added five tests, one of them for cancelling a task before its coroutine starts.
+```markdown
+---
+id: backend
+role: backend
+model:
+reasoning: medium
+---
+You are the backend engineer on an AgentForge team. ...
+```
 
-The same checks were rerun successfully before recording the M1 Git baseline, so M2 can build on
-a verified starting point. File-by-file baseline commits depend on the complete M1 file set;
-verification applies to that combined state, not each intermediate commit.
+| Setting | Meaning |
+|---|---|
+| `id` | Unique name, which is also the file name. Lowercase letters, digits, `-` and `_` only. |
+| `role` | Which tasks the agent takes. Several agents may share a role. |
+| `model` | Claude model to use. Leave it empty for Claude Code's default. |
+| `reasoning` | Effort level: `low`, `medium`, `high`, `xhigh` or `max`. |
 
-Read [the M1 contracts and limitations](docs/milestones/M1-domain.md) and
-[the M2 Claude Code adapter](docs/milestones/M2-claude-code.md) for the library interface,
-scheduling policy, and milestone acceptance checks. State is lost when the process exits. Worktrees,
-edit/execute permissions, actual validation commands, persistence, retries, recovery, APIs, and the
-desktop UI are future work.
+The persona text (up to 10,000 characters) is added to the Claude Code worker's system prompt.
+
+- **Defaults:** backend, frontend, database, qa and integration. They ship in
+  [apps/api/src/agentforge/default_personas](apps/api/src/agentforge/default_personas) and are
+  copied to `%APPDATA%\AgentForge\agents` by `python -m agentforge setup`, but only when that
+  folder has no agents yet.
+- **Edit** a file in any text editor, or call `save_agent(folder, agent)`.
+- **Add** a new `<id>.md` file, or call `save_agent` with a new id.
+- **Remove** the file, or call `remove_agent(folder, agent_id)`.
+- **Load** them all with `load_agents(folder)`. A broken file raises an error that names it.
+
+These functions are in `agentforge.personas`. Editing agents on screen is planned for the desktop
+app (M6), which will call these same functions.
+
+## Documentation
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): setup, commands, workflow, commit rules and a map of the
+  code.
+- [ROADMAP.md](ROADMAP.md): milestones, deferred work and verification history.
+- [GOVERNANCE.md](GOVERNANCE.md): who decides, and what AI agents may do in this repository.
+- [CLAUDE.md](CLAUDE.md): rules for AI coding assistants.
+- [M1: domain and scheduler](docs/milestones/M1-domain.md): contracts, scheduling policy, limits
+  and acceptance checks.
+- [M2: Claude Code adapter](docs/milestones/M2-claude-code.md): executor contract, CLI flags,
+  outcome mapping, the live check and deferred work.
