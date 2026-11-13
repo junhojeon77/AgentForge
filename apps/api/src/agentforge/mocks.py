@@ -2,8 +2,9 @@
 
 import asyncio
 
-from agentforge.domain import AgentConfig, Assignment, TaskSpec, ValidationReport, WorkerResult
+from agentforge.domain import Assignment, TaskSpec, ValidationReport, WorkerResult
 from agentforge.orchestration import Scheduler
+from agentforge.personas import default_agents
 
 DEFAULT_ROLES = ("backend", "frontend", "database", "qa", "integration")
 
@@ -74,10 +75,5 @@ class MockValidator:
 
 
 def register_default_workers(scheduler: Scheduler, executor: MockExecutor | None = None) -> None:
-    for role in DEFAULT_ROLES:
-        scheduler.register_worker(
-            AgentConfig(
-                id=role, role=role, reasoning="high" if role in {"qa", "integration"} else "medium"
-            ),
-            executor if executor is not None else MockExecutor(),
-        )
+    for agent in default_agents():
+        scheduler.register_worker(agent, executor if executor is not None else MockExecutor())
