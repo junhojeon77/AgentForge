@@ -26,8 +26,9 @@ installed. Add each only when its milestone is approved.
 
 Nothing from M2: the worker timeout, the `claude` command and the model rule were finished on
 2026-11-14 (see [the M2 doc](docs/milestones/M2-claude-code.md#finished-after-m2-2026-11-14)).
-From M3: workers running commands themselves, a sandbox or resource limits for checks, automatic
-worktree cleanup and a live test of edit mode. Details are in the
+From M3: workers running commands themselves (decided: only the task's own checks; not built), a
+sandbox or resource limits for checks, and merging worktrees back (M7). Worktree cleanup on
+request and a live check of edit mode were finished on 2026-11-14. Details are in the
 [M3 doc](docs/milestones/M3-worktrees.md#not-implemented-yet).
 From M4's retries and pause/resume: a delay between attempts, a manual retry command and a pause
 that lets running work finish. Details are in the
@@ -54,6 +55,15 @@ Persistence, recovery and the lead agent are the parts of M4 still to build.
   calls the existing `agentforge.personas` functions.
 
 ## Verification history
+
+Verified on 2026-11-14 after adding worktree cleanup: **163 tests passed and 1 skipped** (the
+opt-in live Claude Code test), Ruff lint passed, and all 21 Python files passed the formatting
+check. Added: `worktrees.remove_run` and `python -m agentforge clean`. Separately, two approved
+live calls (Claude Code 2.1.323, `claude-haiku-5-5`, $0.0052 in total) confirmed edit mode: edits
+work inside the worktree, a write outside it and a write to its `.git` file are refused, and a
+full edit, diff and check run completes; see
+[the M3 doc](docs/milestones/M3-worktrees.md#live-check-2026-11-14-claude-code-cli-21323). `clean` then
+removed that run's worktree.
 
 Verified on 2026-11-14 after finishing M2's deferred items: **159 tests passed and 1 skipped**
 (the opt-in live Claude Code test), Ruff lint passed, and all 21 Python files passed the

@@ -21,6 +21,8 @@ No new dependency was added; Git and `asyncio` subprocesses do the work. The sch
 | `worktrees.create(repo, base_commit, path)` | `git worktree add --detach`; `path` must be absolute. The commit is resolved first, so an unknown commit or a value starting with `-` is rejected |
 | `worktrees.diff(path)` | `git add -A -f`, then `git diff --cached --no-ext-diff --no-textconv HEAD`: every change since the base commit, new files included. Files in ignored paths are included too (`-f`), because the checks still run them |
 | `worktrees.remove(repo, path)` | `git worktree remove --force`: deletes the worktree and its uncommitted changes |
+| `worktrees.remove_run(repo, root, run_id)` | Deletes every worktree under `root/<run_id>` (all tasks, all attempts) with `remove`, then the empty folders, and returns the removed paths. Nothing calls it automatically; call it after the run has finished. A folder Git does not know as a worktree is left in place and named in a `RuntimeError`, after the real worktrees are removed. The run id must be a safe id |
+| `python -m agentforge clean <run_id> --repo <repo> --root <root>` | The same from the command line: prints each removed path. Exit 1 when a folder was kept, 2 for an unsafe run id |
 | `TaskSpec.allowed_operations` | `"edit"` gives the Claude Code worker `--tools Read,Glob,Grep,Edit,Write` and `--permission-mode acceptEdits`. Without it the worker is read-only, as in M2 |
 | `WorkerResult.workspace`, `WorkerResult.diff` | Set by `WorktreeExecutor`, never by the model; both are left out of the schema the model fills in |
 | `CommandValidator(checks={name: argv}, timeout=600)` | For each `check:<name>` in `TaskSpec.execution_constraints`, runs `argv` (no shell) in `result.workspace`, or in `task.workspace_reference` when that is unset |
@@ -44,25 +46,48 @@ Outcome mapping:
 - **Worktrees isolate changes, not execution.** A check such as pytest runs code the worker just
   wrote, with your user rights and environment. There is no sandbox, resource limit or approval
   step yet; approvals are planned for M5.
-- **Edit mode is not live-tested.** The flags come from the Claude Code CLI 2.1.323 `--help`
-  text: `--restricted` confines the file tools to the working folder and lets only a person
-  approve writes to settings, Git and tool-configuration files, and `--permission-prompts none`
-  denies anything that would prompt. No live call has confirmed that edits succeed, or are
-  confined, under this combination.
+- **Edit mode was checked live once, with one model.** `--restricted` confines the file tools
+  to the working folder and lets only a person approve writes to settings, Git and
+  tool-configuration files, and `--permission-prompts none` denies anything that would prompt.
+  The [live check](#live-check-2026-11-14-claude-code-cli-21323) below confirmed this for two
+  writes; it is not proof for every path or every CLI version.
 - An `"edit"` task run without `WorktreeExecutor` edits `workspace_reference` in place.
-- Worktrees are kept after a run, for validation and review. Nothing removes them automatically.
+- Worktrees are kept after a run, for validation and review. Nothing removes them automatically,
+  by decision: `worktrees.remove_run` or `python -m agentforge clean` deletes a finished run's
+  worktrees when you ask.
 - `diff` stages the worktree's changes in the worktree's own index. Your checkout's index is not
   touched.
 - A timeout kills only the started check process, not processes it spawned.
 - Diffs are kept in memory with no size cap.
 - Use one `WorktreeExecutor` per repository for all workers: it serializes `git worktree add`.
 
+## Live check (2026-11-14, Claude Code CLI 2.1.323)
+
+Two approved live calls in a scratch repository, with `claude-haiku-5-5`, through
+`WorktreeExecutor`, `ClaudeCodeExecutor` and `CommandValidator`, confirmed:
+
+- an `"edit"` task is offered `Edit`, `Glob`, `Grep`, `Read`, `Write` and the built-in
+  `StructuredOutput`, in permission mode `acceptEdits`, and no tool that runs commands;
+- `Edit` and `Write` succeed inside the worktree with no prompt;
+- a `Write` to a file outside the worktree is refused, and the file is not created;
+- a `Write` to the worktree's own `.git` file is refused ("Permission for this tool use was
+  denied... this session has no approval surface");
+- the whole path works: the edit shows up in the recorded diff, a real check passes on it, the
+  task completes, and the original checkout stays clean.
+
+The two calls cost $0.0052 together. In the first, the worker reported `success: false` because
+its task included steps that were refused; the task failed as `WORKER_FAILURE` and its checks
+never ran, which is the intended order.
+
+Not confirmed live: reading a file outside the worktree, edits by other models, resuming an
+edit-mode session, and a retry of an edit task.
+
 ## Not implemented yet
 
 | Deferred | Waits for |
 |---|---|
-| Workers running commands (tests, builds) themselves | A sandbox decision. Until then only the validator runs commands |
-| Removing worktrees automatically; merging them back | M4 (recovery) and M7 (integration) |
+| Workers running commands (tests, builds) themselves | Decided on 2026-11-14: a worker may run only its own task's checks, nothing else. Not built yet. Until then only the validator runs commands |
+| Merging worktrees back | M7 (integration) |
 | Checking natural-language acceptance criteria | Later; the validator runs commands only |
 
 ## Acceptance checks
@@ -71,7 +96,9 @@ Run the pytest and Ruff commands in the root README. Git tests use disposable re
 pytest temp folder. They cover:
 
 - `test_worktrees.py`: checkout at a base commit, the `HEAD` default, bad commits, relative
-  paths, the diff of modified, new and ignored files, removal, unsafe ids, a missing repository, an
+  paths, the diff of modified, new and ignored files, removal of one worktree and of a whole run
+  (another run's worktrees kept, a folder Git does not know kept and named, the `clean` command),
+  unsafe ids, a missing repository, an
   existing worktree, two workers at once, and a full run in which a fake Claude edit shows up in
   the diff, passes a real check and leaves the original checkout clean.
 - `test_validation.py`: passing, failing and unknown checks, false worker claims, which

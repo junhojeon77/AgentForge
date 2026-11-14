@@ -19,6 +19,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m agentforge                      # five-worker mock demo, prints JSON report
 .\.venv\Scripts\python.exe -m agentforge setup                # copy default personas to %APPDATA%\AgentForge\agents
 .\.venv\Scripts\python.exe -m agentforge claude "<task>"       # one read-only Claude Code task (billed)
+.\.venv\Scripts\python.exe -m agentforge clean <run_id> --repo <repo> --root <root>  # delete a finished run's worktrees
 .\.venv\Scripts\python.exe -m pytest apps/api/tests          # all tests
 .\.venv\Scripts\python.exe -m pytest apps/api/tests/test_scheduler.py::test_empty_plan   # single test
 .\.venv\Scripts\python.exe -m ruff check apps/api
@@ -171,7 +172,9 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   root)` wraps another executor: it creates `root/<run_id>/<task_id>/<attempt>` (ids limited to
   `[A-Za-z0-9_-]+`), runs `inner` there and adds `workspace` and `diff` to the result. Each retry
   gets a new worktree. Worktrees are kept, are not sandboxes, and are reused only by an attempt
-  that is being resumed after a pause.
+  that is being resumed after a pause. `remove_run(repo, root, run_id)` deletes every worktree
+  of a finished run on request; a folder Git does not know as a worktree is kept and named in
+  the error.
 - **`validation.py`: `CommandValidator`.** Runs each `check:<name>` constraint as a configured
   argv (no shell) in the result's workspace with a timeout. It rejects on a non-zero exit, a
   timeout or an unknown check, and never reads the worker's `passed_checks`. Timeout and
@@ -189,7 +192,7 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   mock five-task demo (`main()`); `setup` creates the persona folder at `default_folder()`;
   `claude "<task>"` runs one read-only task with `ClaudeCodeExecutor` for every agent in the
   persona folder (or the defaults) and prints the report. A missing folder or an unknown role
-  stops it before Claude starts.
+  stops it before Claude starts. `clean <run_id> --repo --root` calls `worktrees.remove_run`.
 
 Tests are in `apps/api/tests/`:
 - `test_contracts.py`: contract validation and immutability.

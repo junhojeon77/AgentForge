@@ -188,11 +188,19 @@ from agentforge.worktrees import WorktreeExecutor
 
 The worker edits `C:\path\to\worktrees\r1\t1\1` (run, task, attempt), not your checkout. Afterwards
 `report.attempts[0].result.diff` holds the change, and the task completes only if pytest exits 0
-there. The worktree is kept; delete it with `agentforge.worktrees.remove(repo, path)`.
+there. The worktree is kept. When the run is finished and reviewed, delete all of its worktrees:
+
+```powershell
+.\.venv\Scripts\python.exe -m agentforge clean r1 --repo C:\path\to\some\repo --root C:\path\to\worktrees
+```
+
+In Python that is `await agentforge.worktrees.remove_run(repo, root, "r1")`. Uncommitted changes in
+those worktrees are deleted with them; the diff stays in the report.
 
 Two things to know first. Checks run code the worker wrote, with your user rights: a worktree
-is not a sandbox. And edit mode has not been tried against the live CLI yet. Both are detailed
-in [the M3 doc](docs/milestones/M3-worktrees.md).
+is not a sandbox. And edit mode was confirmed against the live CLI in one check, with one model:
+edits worked, and writes outside the worktree or to its `.git` file were refused. Both are
+detailed in [the M3 doc](docs/milestones/M3-worktrees.md).
 
 ### 5. Retry a failed task
 

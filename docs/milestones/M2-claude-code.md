@@ -31,8 +31,9 @@ Flags used on every call: `-p --output-format stream-json --verbose --json-schem
 --session-id <uuid> --effort <level> --tools Read,Glob,Grep --permission-prompts none --restricted
 --strict-mcp-config --max-budget-usd <n>`, plus `--model` and `--append-system-prompt` when set.
 The prompt is written to stdin. Per the CLI 2.1.323 `--help`, `--restricted` also confines the file
-tools to the working directory, so workers can't read outside the task's workspace. This comes
-from the help text only; no live test checks it.
+tools to the working directory, so workers can't read outside the task's workspace. For writes a live
+call confirmed it on 2026-11-14 (see [M3](M3-worktrees.md#live-check-2026-11-14-claude-code-cli-21323)); for reads it
+still comes from the help text only.
 The JSON schema is `WorkerResult`'s schema without `session_id`, with every field required.
 
 Outcome mapping:

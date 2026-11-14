@@ -146,7 +146,8 @@ logging.basicConfig(level=logging.DEBUG)
 |---|---|---|
 | `agentforge.orchestration` | DEBUG | Every transition: run, task, status, attempt number, worker and the `Transition.detail` text, e.g. `run r1 task a: PAUSED (attempt 1, worker None): pause_task was called while RUNNING` |
 | `agentforge.orchestration` | WARNING | A failed attempt, with the same text as `Transition.detail` |
-| `agentforge.worktrees` | DEBUG | A worktree created (path and commit) or reused for a resumed attempt; a diff recorded (length only) |
+| `agentforge.worktrees` | DEBUG | A worktree created (path and commit) or reused for a resumed attempt; a diff recorded (length only); a worktree removed by `remove_run` (path) |
+| `agentforge.worktrees` | WARNING | `remove_run` kept a folder that Git does not know as a worktree (path only; Git's message is in the raised error) |
 | `agentforge.claude_code` | DEBUG | A Claude process started or resumed (task, attempt, session id, folder, tools) and finished (exit code, result subtype) |
 | `agentforge.claude_code` | WARNING | No saved session to resume, so a fresh one is started in the same folder. An output line that is not a JSON event was skipped (task id and length only) |
 | `agentforge.validation` | DEBUG | Each check: name, folder, and exit code or timeout |
@@ -165,7 +166,8 @@ because those can contain secrets. Read those in the report.
 - **No delay between attempts.** A failure caused by a rate limit is retried at once.
 - **The failure text is untrusted.** Check output comes from code the worker wrote. It is passed
   to the next worker labelled as data, but a label is not a guarantee.
-- **Failed attempts' worktrees are kept.** Nothing removes them automatically.
+- **Failed attempts' worktrees are kept.** Nothing removes them automatically; `worktrees.remove_run`
+  or `python -m agentforge clean` deletes a finished run's worktrees when you ask.
 - An `"edit"` task run without `WorktreeExecutor` still edits `workspace_reference` in place, so
   its retry sees the failed attempt's edits.
 - Retries have been tested only against the fake CLI and mock workers.
@@ -192,7 +194,6 @@ because those can contain secrets. Read those in the report.
 | A pause that lets running work finish first | When wanted; today a pause always stops the worker |
 | A delay or backoff between attempts | When a real rate-limit failure shows the need |
 | A manual "retry this task" command | M5, with the REST commands |
-| Removing worktrees automatically | M4 (recovery) |
 
 ## Acceptance checks
 
