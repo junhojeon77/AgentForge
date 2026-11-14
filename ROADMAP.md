@@ -56,6 +56,11 @@ Persistence, recovery and the lead agent are the parts of M4 still to build.
 
 ## Verification history
 
+Verified on 2026-11-14 after fixing four review findings on M4: **134 tests passed and 1 skipped**
+(the opt-in live Claude Code test), Ruff lint passed, and all 21 Python files passed the
+formatting check. The fixes: a resume that arrives while a paused worker is still stopping no
+longer cancels the task, and ids, roles and titles reject control characters.
+
 Verified on 2026-11-13 after M4's pause/resume: **119 tests passed and 1 skipped** (the opt-in live
 Claude Code test), Ruff lint passed, and all 21 Python files passed the formatting check.
 Separately, three approved live calls (Claude Code 2.1.323, $0.026 reported) confirmed that a

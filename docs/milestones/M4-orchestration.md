@@ -151,6 +151,9 @@ logging.basicConfig(level=logging.DEBUG)
 | `agentforge.claude_code` | WARNING | No saved session to resume, so a fresh one is started in the same folder |
 | `agentforge.validation` | DEBUG | Each check: name, folder, and exit code or timeout |
 
+Ids, roles and titles cannot contain control characters or line separators (the contract rejects
+them), so an id cannot forge a log line.
+
 Logs hold ids, statuses, reasons, paths, exit codes and exception type names only. They never
 hold the prompt, the persona, a diff, check output, a failure message or an exception's text,
 because those can contain secrets. Read those in the report.
@@ -204,8 +207,10 @@ Run the pytest and Ruff commands in the root README. The M4 tests cover:
   a waiting task held while its dependents wait, a pause during validation rerunning only the
   validation, `pause_run`/`resume_run` leaving a hand-paused task paused, resume on the worker
   that started the attempt, cancelling a paused task, pausing finished and unknown tasks, a late
-  error from a stopped worker, a pause while waiting for a retry, and the log lines.
-- `test_contracts.py`: the bounds of `max_attempts`.
+  error from a stopped worker, a resume that arrives while the paused worker is still stopping,
+  a pause while waiting for a retry, and the log lines.
+- `test_contracts.py`: the bounds of `max_attempts`, and ids, roles and titles rejecting control
+  characters and line separators.
 - `test_claude_code.py`: the retry prompt, the scheduler's session id, `--resume` with the same
   limits, the fresh-session fallback and its warning, and no fallback for other failures.
 - `test_worktrees.py`: a full run in which a real check fails once and the second attempt runs

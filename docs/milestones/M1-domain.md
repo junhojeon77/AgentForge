@@ -24,7 +24,8 @@ frozen objects, so callers cannot change scheduler state through them.
 `dependencies`, `repository_reference`, `base_commit`, optional `workspace_reference`,
 `acceptance_criteria`, `allowed_operations`, `execution_constraints`, and `expected_output`.
 The current status and worker ownership live separately in `TaskState`. IDs, title, and role must
-contain a non-whitespace character. Descriptive fields default to empty strings/tuples; workspace
+contain a non-whitespace character and, since M4, no control characters or line separators,
+because they are printed in logs. Descriptive fields default to empty strings/tuples; workspace
 defaults to unassigned. Priorities are strict integers, with larger values dispatched first.
 
 `RunPlan(id, tasks)` supplies the complete fixed graph. Before dispatch, the scheduler checks unique

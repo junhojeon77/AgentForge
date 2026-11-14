@@ -71,7 +71,9 @@ scheduler, mock workers, a Claude Code worker, Git worktrees, a command validato
 agent personas, all in `apps/api/src/agentforge`. State is lost when the process exits.
 
 - **`domain.py`: contracts.** Every model extends `Contract` (Pydantic, `frozen=True`,
-  `extra="forbid"`, `revalidate_instances="always"`); collections are tuples. `TaskSpec` is the
+  `extra="forbid"`, `revalidate_instances="always"`); collections are tuples. `Identifier` (ids,
+  roles, titles) rejects control characters and line separators, because those values are
+  printed in logs and transition reasons. `TaskSpec` is the
   frozen task definition. Mutable progress lives in separate scheduler-owned
   `TaskState`/`WorkerState`/`TaskAttempt` values, which are replaced with
   `model_copy(update=...)`, never mutated. `AgentConfig.model` (default `None` = runtime default)
