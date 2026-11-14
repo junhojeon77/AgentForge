@@ -193,7 +193,8 @@ Add `max_attempts` (1–5, default 1) to the task:
 If pytest fails, the task runs again in a new worktree (`...\r1\t1\2`) with a new Claude session,
 and the worker is told the check output. The task fails only when all three attempts have failed.
 Every attempt is billed. `report.attempts` lists each one with its diff and failure message, and
-`report.transitions` says why each retry happened or did not.
+`report.transitions` gives a reason for every status change: why a task was retried, failed,
+blocked or cancelled.
 
 To follow a run as it happens, turn on logging before you start it:
 

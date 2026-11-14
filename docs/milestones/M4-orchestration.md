@@ -35,7 +35,7 @@ No new dependency was added.
 | `Assignment.previous_failure` | The previous attempt's failure message; empty on the first attempt |
 | `TaskState.attempt_number` | The latest attempt started; 0 before the first |
 | `TaskAttempt.message` | Why this attempt failed; empty when it did not |
-| `Transition.detail` | The retry decision, on the transition that follows a failed attempt |
+| `Transition.detail` | Why the transition happened. Never empty; the texts are listed under [How to debug a run](#how-to-debug-a-run) |
 | `RunReport.attempts` | Every attempt of every task, in dispatch order |
 | `WorktreeExecutor` path | `root/<run_id>/<task_id>/<attempt>` (was `root/<run_id>/<task_id>` in M3) |
 
@@ -61,7 +61,25 @@ The report answers these after the run, with no logging set up:
 | Was it retried, and why or why not? | `Transition.detail` on the transition after the failure: `attempt 1 of 3 failed (validation_rejected); retrying`, `attempt 3 of 3 failed (validation_rejected); no attempts left`, or `attempt 1 of 2 failed (validator_exception); not retried: validator errors are setup problems` |
 | Where did attempt N run, and what did it change? | `TaskAttempt.result.workspace`, `.diff` and `.session_id` |
 | What was the worker told on the retry? | `Assignment.previous_failure`, which equals the failed attempt's `message` |
-| Why is the task in its final state? | `TaskState.failure_reason`, `message`, `blocked_by` and `attempt_number` |
+| Why is the task in its final state? | `TaskState.message`: the failure message, `blocked by a, which is FAILED`, or who cancelled it. Also `failure_reason`, `blocked_by` and `attempt_number` |
+| Why did the task change status? | `Transition.detail` on every transition; see the table below |
+
+Every transition says why it happened:
+
+| Status | `Transition.detail` |
+|---|---|
+| `PENDING` | `queued` |
+| `READY` | `no unfinished dependencies`, or after a failed attempt `attempt 1 of 3 failed (validation_rejected); retrying` |
+| `ASSIGNED` | `attempt 1 of 3 assigned to worker backend` |
+| `RUNNING` | `worker started` |
+| `VALIDATING` | `worker reported success; validating` |
+| `COMPLETED` | `validation accepted` |
+| `FAILED` | `attempt 3 of 3 failed (validation_rejected); no attempts left`, or `…; not retried: validator errors are setup problems` |
+| `BLOCKED` | `blocked by a, which is FAILED` or `blocked by a, which is CANCELLED`. `a` is the task that failed or was cancelled, not necessarily a direct dependency |
+| `CANCELLED` | `cancel_task was called`, `cancel_run was called`, `run() stopped by CancelledError` (the type of the error that ended `run()`), or `worker task was cancelled` (the asyncio task was cancelled from outside the scheduler) |
+
+For `BLOCKED` and `CANCELLED` the same text is in `TaskState.message`, and a cancelled attempt
+has it in `TaskAttempt.message`.
 
 The log follows a run as it happens. AgentForge uses the standard `logging` module and installs
 no handler, so nothing is printed until you ask:
@@ -74,15 +92,15 @@ logging.basicConfig(level=logging.DEBUG)
 
 | Logger | Level | Event |
 |---|---|---|
-| `agentforge.orchestration` | DEBUG | Every transition: run, task, status, attempt number and worker |
+| `agentforge.orchestration` | DEBUG | Every transition: run, task, status, attempt number, worker and the `Transition.detail` text, e.g. `run r1 task b: BLOCKED (attempt 0, worker None): blocked by a, which is FAILED` |
 | `agentforge.orchestration` | WARNING | A failed attempt, with the same text as `Transition.detail` |
 | `agentforge.worktrees` | DEBUG | A worktree created (path and commit); a diff recorded (length only) |
 | `agentforge.claude_code` | DEBUG | A Claude process started (task, attempt, session id, folder, tools) and finished (exit code, result subtype) |
 | `agentforge.validation` | DEBUG | Each check: name, folder, and exit code or timeout |
 
-Logs hold ids, statuses, reasons, paths and exit codes only. They never hold the prompt, the
-persona, a diff, check output or a failure message, because those can contain secrets. Read
-those in the report.
+Logs hold ids, statuses, reasons, paths, exit codes and exception type names only. They never
+hold the prompt, the persona, a diff, check output, a failure message or an exception's text,
+because those can contain secrets. Read those in the report.
 
 ## Limits
 
@@ -114,7 +132,8 @@ Run the pytest and Ruff commands in the root README. The retry tests cover:
 
 - `test_scheduler.py`: a pass on the second attempt with the failure passed on, attempts running
   out and blocking descendants, each failure reason retried or not, cancelling a task that waits
-  for its retry, the `Transition.detail` texts, and the log lines without the failure text.
+  for its retry, the `Transition.detail` text of every status (including each way a task can be
+  cancelled), and the log lines without the failure text.
 - `test_contracts.py`: the bounds of `max_attempts`.
 - `test_claude_code.py`: the retry prompt.
 - `test_worktrees.py`: a full run in which a real check fails once and the second attempt runs

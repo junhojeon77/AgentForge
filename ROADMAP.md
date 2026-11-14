@@ -55,7 +55,11 @@ From M4's retries: a delay between attempts and a manual retry command. Details 
 
 ## Verification history
 
-Verified on 2026-11-13 after M4's retries: **100 tests passed and 1 skipped** (the opt-in live
+Verified on 2026-11-13 after giving every transition a reason: **102 tests passed and 1 skipped**
+(the opt-in live Claude Code test), Ruff lint passed, and all 21 Python files passed the
+formatting check.
+
+Verified earlier on 2026-11-13 after M4's retries: 100 tests passed and 1 skipped (the opt-in live
 Claude Code test), Ruff lint passed, and all 21 Python files passed the formatting check. Retries
 were tested with mock workers and the fake CLI only; no live call was made.
 

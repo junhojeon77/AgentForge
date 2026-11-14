@@ -102,8 +102,11 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
     FAILED, because FAILED is terminal and would block descendants. Otherwise the task fails.
     Attempts are keyed by `(task_id, number)`; `_transition()` leaves an already-finished attempt
     alone, so cancelling a task that waits for its retry keeps the failed attempt's record.
-  - Logging: `_record()` logs every transition at DEBUG and `_fail()` logs the retry decision at
-    WARNING. No module logs a prompt, persona, diff, check output or failure message.
+  - Diagnostics: every `_transition()`/`_record()` call passes a `detail` saying why, so no
+    `Transition.detail` is empty. BLOCKED and CANCELLED also put it in `TaskState.message`
+    (`_block_descendants()`, `_cancel()`, `_cancel_all()`). `_record()` logs every transition
+    with its detail at DEBUG and `_fail()` logs the retry decision at WARNING. No module logs a
+    prompt, persona, diff, check output, failure message or exception text.
   - Atomicity relies on a single event loop and on making no `await` inside a state mutation.
     `_transition()` refuses to leave a terminal state, so the first terminal outcome wins: late
     success can't overwrite cancellation.
