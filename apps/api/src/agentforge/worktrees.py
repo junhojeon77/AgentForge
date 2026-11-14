@@ -77,8 +77,13 @@ class WorktreeExecutor:
             if not _SAFE_ID.fullmatch(value):
                 raise ValueError(f"worktree id {value!r} may use only A-Z, a-z, 0-9, '-' and '_'")
         path = self.root / task.run_id / task.id / str(assignment.attempt_number)
-        async with self._creating:
-            await create(task.repository_reference, task.base_commit, path)
+        # Only an attempt the scheduler is resuming may reuse its worktree; its edits and its
+        # saved Claude session live there. A single local stat; not worth a thread hop.
+        if assignment.resume and path.is_dir():  # noqa: ASYNC240
+            logger.debug("worktree reused: %s", path)
+        else:
+            async with self._creating:
+                await create(task.repository_reference, task.base_commit, path)
         inner_task = task.model_copy(update={"workspace_reference": str(path)})
         result = WorkerResult.model_validate(
             await self.inner.execute(assignment.model_copy(update={"task": inner_task}))

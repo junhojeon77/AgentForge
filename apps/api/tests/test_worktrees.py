@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 import pytest
-from test_claude_code import FAKE_CLAUDE, fake_call
+from test_claude_code import FAKE_CLAUDE, fake_call, flag, is_running
 
 from agentforge import worktrees
 from agentforge.claude_code import ClaudeCodeExecutor
@@ -134,6 +134,28 @@ async def test_executor_never_reuses_an_existing_worktree(repo, tmp_path):
     assert kept.read_text(encoding="utf-8") == "mine\n"
 
 
+async def test_resume_reuses_the_attempts_worktree_and_keeps_its_edits(repo, tmp_path, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    inner = MockExecutor()
+    executor = WorktreeExecutor(inner, tmp_path / "trees")
+    first = await executor.execute(assignment(repo))
+    (pathlib.Path(first.workspace) / "keep.txt").write_text("mine\n", encoding="utf-8")
+
+    again = await executor.execute(assignment(repo).model_copy(update={"resume": True}))
+
+    assert again.workspace == first.workspace
+    assert "+mine" in again.diff
+    assert [a.task.workspace_reference for a in inner.assignments] == [first.workspace] * 2
+    assert inner.assignments[1].resume
+    assert f"worktree reused: {first.workspace}" in caplog.text
+
+
+async def test_resume_creates_the_worktree_when_the_pause_came_before_it_existed(repo, tmp_path):
+    executor = WorktreeExecutor(MockExecutor(), tmp_path / "trees")
+    result = await executor.execute(assignment(repo).model_copy(update={"resume": True}))
+    assert (pathlib.Path(result.workspace) / "hello.txt").exists()
+
+
 async def test_workers_get_separate_worktrees_at_once(repo, tmp_path):
     gate = asyncio.Event()
     inner = MockExecutor(gate=gate, expected_starts=2)
@@ -174,6 +196,47 @@ async def test_edit_run_records_the_diff_and_passes_a_real_check(repo, tmp_path,
     assert "fake_edit.txt" in result.diff and "+edited by fake claude" in result.diff
     assert pathlib.Path(fake_call(tree)["cwd"]).samefile(tree)  # noqa: ASYNC240
     assert not (repo / "fake_edit.txt").exists()
+    assert git(repo, "status", "--porcelain") == ""
+
+
+async def test_paused_claude_worker_is_killed_and_resumes_its_session_in_the_same_worktree(
+    repo, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "call.json"))
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "hang")
+    started = asyncio.Event()
+    claude = ClaudeCodeExecutor(
+        command=(sys.executable, str(FAKE_CLAUDE)), on_event=lambda task_id, event: started.set()
+    )
+    exists = "import pathlib, sys; sys.exit(not pathlib.Path('fake_edit.txt').exists())"
+    engine = Scheduler(
+        validator=CommandValidator(checks={"edited": (sys.executable, "-c", exists)})
+    )
+    engine.register_worker(
+        AgentConfig(id="w", role="backend"), WorktreeExecutor(claude, tmp_path / "trees")
+    )
+    edit = task(repo, allowed_operations=("edit",), execution_constraints=("check:edited",))
+    running = asyncio.create_task(engine.run(RunPlan(id="run", tasks=(edit,))))
+    await asyncio.wait_for(started.wait(), 30)
+
+    await asyncio.wait_for(engine.pause_task("a"), 30)
+    first = fake_call(tmp_path / "trees")
+    assert engine.snapshot().tasks[0].status == TaskStatus.PAUSED
+    assert not is_running(first["pid"])
+
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "edit")
+    await engine.resume_task("a")
+    report = await asyncio.wait_for(running, 60)
+
+    tree = tmp_path / "trees" / "run" / "a" / "1"
+    second = fake_call(tmp_path / "trees")
+    (attempt,) = report.attempts
+    assert report.tasks[0].status == TaskStatus.COMPLETED, report.tasks[0].message
+    assert flag(second["argv"], "--resume") == flag(first["argv"], "--session-id")
+    assert attempt.session_id == attempt.result.session_id == flag(second["argv"], "--resume")
+    assert pathlib.Path(second["cwd"]).samefile(tree)  # noqa: ASYNC240
+    assert "interrupted" in second["stdin"]
+    assert attempt.result.workspace == str(tree) and "fake_edit.txt" in attempt.result.diff
     assert git(repo, "status", "--porcelain") == ""
 
 
