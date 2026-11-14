@@ -15,6 +15,9 @@ FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "claude_stream.jsonl"
 argv = sys.argv[1:]
 resuming = "--resume" in argv
 session_id = argv[argv.index("--resume" if resuming else "--session-id") + 1]
+if os.environ.get("FAKE_CLAUDE_MODE") == "unread":  # dies before it reads the prompt
+    print("fatal: not logged in", file=sys.stderr, flush=True)
+    sys.exit(1)
 prompt = sys.stdin.read()
 log = json.dumps({"argv": argv, "cwd": os.getcwd(), "stdin": prompt, "pid": os.getpid()})
 pathlib.Path(os.environ["FAKE_CLAUDE_LOG"]).write_text(log, encoding="utf-8")

@@ -269,6 +269,13 @@ async def test_batch_file_launcher_is_rejected(tmp_path):
         await claude.execute(Assignment(task=task(tmp_path), worker=AgentConfig(id="w", role="b")))
 
 
+async def test_exit_before_reading_the_prompt_still_reports_the_cli_error(workspace, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "unread")
+    big = task(workspace).model_copy(update={"description": "x" * 200_000})
+    with pytest.raises(RuntimeError, match="fatal: not logged in"):
+        await executor().execute(Assignment(task=big, worker=AgentConfig(id="w", role="backend")))
+
+
 @pytest.mark.skipif(
     os.environ.get("AGENTFORGE_LIVE_CLAUDE") != "1",
     reason="live call: set AGENTFORGE_LIVE_CLAUDE=1 and AGENTFORGE_CLAUDE=<claude path>",

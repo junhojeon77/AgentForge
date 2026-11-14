@@ -6,6 +6,7 @@ Flags and the stream-json event shapes were checked against Claude Code CLI 2.1.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import pathlib
@@ -193,8 +194,10 @@ class ClaudeCodeExecutor:
             limit=STREAM_LIMIT,
         )
         try:
-            proc.stdin.write(prompt.encode("utf-8"))
-            await proc.stdin.drain()
+            # A CLI that exits before it reads the prompt says why on stderr, which is read below.
+            with contextlib.suppress(ConnectionError):
+                proc.stdin.write(prompt.encode("utf-8"))
+                await proc.stdin.drain()
             proc.stdin.close()
             stderr, result = await asyncio.gather(
                 proc.stderr.read(), self._read_events(task.id, proc.stdout)
