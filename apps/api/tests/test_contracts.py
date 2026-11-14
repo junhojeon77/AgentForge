@@ -72,6 +72,11 @@ def test_agent_model_defaults_to_runtime_choice_and_effort_is_validated():
         AgentConfig(id="a", role="backend", reasoning="extreme")
 
 
+def test_agent_has_no_permissions_setting():
+    with pytest.raises(ValidationError):
+        AgentConfig(id="a", role="backend", permissions=("read",))
+
+
 def test_agent_persona_is_optional_and_capped():
     assert AgentConfig(id="a", role="backend").persona == ""
     assert len(AgentConfig(id="a", role="backend", persona="x" * 10_000).persona) == 10_000
