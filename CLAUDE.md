@@ -93,3 +93,9 @@ exist yet; don't invent commands for them.
 When behavior changes, update `README.md` (usage), `ROADMAP.md` (status), the matching
 `docs/milestones/` file and the CONTRIBUTING.md code map. Keep implemented and planned behavior
 clearly apart.
+
+Always record decisions. Every new or changed design decision gets an entry in
+`docs/DECISIONS.md` in the same piece of work, using its five lines: Decision, Why, What I gave
+up, What would make me change it, Where. The file is the maintainer's private record and Git
+ignores it: never commit it or remove it from `.gitignore`. Write the maintainer's personal
+answers (motivation, lessons, their own part) only as "Draft: confirm or rewrite".
