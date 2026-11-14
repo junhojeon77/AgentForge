@@ -214,7 +214,17 @@ class ClaudeCodeExecutor:
         async for line in stdout:
             if not line.strip():
                 continue
-            event = json.loads(line)
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                event = None
+            if not isinstance(event, dict):
+                # The length only: the line can hold anything.
+                logger.warning(
+                    "task %s: skipped an output line of %d bytes that is not a JSON event",
+                    task_id, len(line),
+                )  # fmt: skip
+                continue
             if self.on_event is not None:
                 self.on_event(task_id, event)
             if event.get("type") == "result":

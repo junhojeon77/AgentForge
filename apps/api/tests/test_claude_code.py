@@ -276,6 +276,22 @@ async def test_exit_before_reading_the_prompt_still_reports_the_cli_error(worksp
         await executor().execute(Assignment(task=big, worker=AgentConfig(id="w", role="backend")))
 
 
+async def test_output_line_that_is_not_a_json_event_is_skipped(workspace, monkeypatch, caplog):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "noise")
+    seen = []
+    claude = executor(on_event=lambda task_id, event: seen.append(event))
+    result = await claude.execute(
+        Assignment(task=task(workspace), worker=AgentConfig(id="w", role="backend"))
+    )
+    assert result.success and result.message == "pineapple"
+    assert seen and all(isinstance(event, dict) for event in seen)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 2
+    assert all(w.startswith("task a: skipped an output line of ") for w in warnings)
+    assert all(w.endswith(" bytes that is not a JSON event") for w in warnings)
+    assert "SECRET-TOKEN" not in caplog.text
+
+
 @pytest.mark.skipif(
     os.environ.get("AGENTFORGE_LIVE_CLAUDE") != "1",
     reason="live call: set AGENTFORGE_LIVE_CLAUDE=1 and AGENTFORGE_CLAUDE=<claude path>",

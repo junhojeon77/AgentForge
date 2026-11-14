@@ -34,7 +34,10 @@ if mode == "no_session" and resuming:
     sys.exit(1)
 if mode == "edit":
     pathlib.Path("fake_edit.txt").write_text("edited by fake claude\n", encoding="utf-8")
-if mode in ("ok", "edit", "no_session"):
+if mode == "noise":
+    print("Notice: SECRET-TOKEN is not JSON", flush=True)
+    print("[1, 2]", flush=True)  # JSON, but not an event
+if mode in ("ok", "edit", "no_session", "noise"):
     print("\n".join(events), flush=True)
 elif mode == "error_result":
     print(events[0], flush=True)
