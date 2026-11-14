@@ -90,9 +90,18 @@ exist yet; don't invent commands for them.
 
 ## Docs
 
-When behavior changes, update `README.md` (usage), `ROADMAP.md` (status), the matching
-`docs/milestones/` file and the CONTRIBUTING.md code map. Keep implemented and planned behavior
-clearly apart.
+Every change updates every document it affects, in the same piece of work, with no exceptions:
+code, tests, config, commands, rules or docs. Before calling a change done, search all of these
+for what changed (names, behavior, numbers, commands) and fix every stale line:
+
+- `README.md` (usage), `ROADMAP.md` (status, deferred lists, verification history)
+- every `docs/milestones/` file that mentions it, including "Not implemented yet" tables: delete
+  a row once it is done, wherever it appears
+- the `CONTRIBUTING.md` code map and commands, `GOVERNANCE.md` and this file
+- `docs/DECISIONS.md` (see below)
+
+Keep implemented and planned behavior clearly apart. Report which documents were updated, and
+say so when a change touches none.
 
 Always record decisions. Every new or changed design decision gets an entry in
 `docs/DECISIONS.md` in the same piece of work, using its five lines: Decision, Why, What I gave

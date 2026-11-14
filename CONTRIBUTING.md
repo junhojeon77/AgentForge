@@ -52,8 +52,11 @@ assertions, skip tests or change expectations just to pass.
 
 A change is done when pytest and both Ruff checks pass, the diff has been reviewed for
 correctness, unrelated changes and security, and the PR reports the exact results (with any checks
-that were not run named). When behavior changes, update the README (usage), ROADMAP.md (status)
-and the matching milestone doc, keeping implemented and planned behavior apart.
+that were not run named). Every change also updates every document it affects in the same piece
+of work: the README (usage), ROADMAP.md (status, deferred lists, verification history), every
+milestone doc that mentions it (a done row leaves its "Not implemented yet" table), this file's
+code map and commands, GOVERNANCE.md and CLAUDE.md. Keep implemented and planned behavior apart,
+and say in the PR which documents changed.
 
 ## Commits and pull requests
 
