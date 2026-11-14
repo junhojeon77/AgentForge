@@ -44,10 +44,10 @@ You can hold one task or the whole run, and later continue where it stopped.
 
 | Command | Behavior |
 |---|---|
-| `await pause_task(task_id)` | Holds the task as `PAUSED`. Unknown ids raise `KeyError`; a finished or already paused task is left as it is |
+| `await pause_task(task_id)` | Holds the task as `PAUSED`. Unknown ids raise `KeyError`; a finished or already paused task is left as it is, except that a task `pause_run` paused becomes paused by hand, so `resume_run` no longer resumes it |
 | `await resume_task(task_id)` | Puts a paused task back in the queue |
 | `await pause_run()` | Pauses every unfinished task |
-| `await resume_run()` | Resumes the tasks that `pause_run` paused. A task you paused with `pause_task` stays paused until `resume_task` |
+| `await resume_run()` | Resumes the tasks that `pause_run` paused. A task you paused with `pause_task`, before or after `pause_run`, stays paused until `resume_task` |
 
 What a pause does depends on where the task is:
 
@@ -125,7 +125,7 @@ Every transition says why it happened:
 | `RUNNING` | `worker started` or `worker resumed` |
 | `VALIDATING` | `worker reported success; validating`, or `validating again after a pause` |
 | `COMPLETED` | `validation accepted` |
-| `PAUSED` | `pause_task was called while RUNNING` or `pause_run was called while PENDING`: who paused it and the status it had |
+| `PAUSED` | `pause_task was called while RUNNING` or `pause_run was called while PENDING`: who paused it and the status it had. `pause_task was called while PAUSED`: a task held by `pause_run` was then paused by hand |
 | `FAILED` | `attempt 3 of 3 failed (validation_rejected); no attempts left`, or `…; not retried: validator errors are setup problems` |
 | `BLOCKED` | `blocked by a, which is FAILED` or `blocked by a, which is CANCELLED`. `a` is the task that failed or was cancelled, not necessarily a direct dependency |
 | `CANCELLED` | `cancel_task was called`, `cancel_run was called`, `run() stopped by CancelledError` (the type of the error that ended `run()`), or `worker task was cancelled` (the asyncio task was cancelled from outside the scheduler) |
@@ -148,7 +148,7 @@ logging.basicConfig(level=logging.DEBUG)
 | `agentforge.orchestration` | WARNING | A failed attempt, with the same text as `Transition.detail` |
 | `agentforge.worktrees` | DEBUG | A worktree created (path and commit) or reused for a resumed attempt; a diff recorded (length only) |
 | `agentforge.claude_code` | DEBUG | A Claude process started or resumed (task, attempt, session id, folder, tools) and finished (exit code, result subtype) |
-| `agentforge.claude_code` | WARNING | No saved session to resume, so a fresh one is started in the same folder |
+| `agentforge.claude_code` | WARNING | No saved session to resume, so a fresh one is started in the same folder. An output line that is not a JSON event was skipped (task id and length only) |
 | `agentforge.validation` | DEBUG | Each check: name, folder, and exit code or timeout |
 
 Ids, roles and titles cannot contain control characters or line separators (the contract rejects
@@ -205,14 +205,18 @@ Run the pytest and Ruff commands in the root README. The M4 tests cover:
   way a task can be cancelled), and the log lines without the failure text.
 - `test_scheduler.py`, pause/resume: a running task continuing the same attempt and session id,
   a waiting task held while its dependents wait, a pause during validation rerunning only the
-  validation, `pause_run`/`resume_run` leaving a hand-paused task paused, resume on the worker
+  validation, `pause_run`/`resume_run` leaving a hand-paused task paused in both orders,
+  resume on the worker
   that started the attempt, cancelling a paused task, pausing finished and unknown tasks, a late
   error from a stopped worker, a resume that arrives while the paused worker is still stopping,
   a pause while waiting for a retry, and the log lines.
-- `test_contracts.py`: the bounds of `max_attempts`, and ids, roles and titles rejecting control
-  characters and line separators.
+- `test_contracts.py`: the bounds of `max_attempts`, ids, roles and titles rejecting control
+  characters and line separators, and `AgentConfig` rejecting the removed `permissions`.
 - `test_claude_code.py`: the retry prompt, the scheduler's session id, `--resume` with the same
-  limits, the fresh-session fallback and its warning, and no fallback for other failures.
-- `test_worktrees.py`: a full run in which a real check fails once and the second attempt runs
+  limits, the fresh-session fallback and its warning, no fallback for other failures, a rejected
+  batch-file launcher, a CLI that exits before it reads its prompt, and a skipped non-JSON
+  output line that is logged by length only.
+- `test_worktrees.py`: a diff that includes files in ignored paths; a full run in which a real
+  check fails once and the second attempt runs
   in a fresh worktree; a resumed attempt reusing its worktree; and a full run in which a paused
   fake Claude process is killed and then resumed in the same worktree with `--resume`.

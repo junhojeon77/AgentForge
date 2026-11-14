@@ -85,7 +85,8 @@ the lead agent, the API and the desktop app) is in [ROADMAP.md](ROADMAP.md).
 - Python 3.11 or newer
 - Git, to clone the repository
 - For real (non-mock) workers only: Claude Code installed and logged in. The VS Code extension
-  bundles `claude.exe`.
+  bundles `claude.exe`. An npm install's `claude.cmd` launcher is rejected; pass the path to
+  `claude.exe`.
 
 ## Install
 

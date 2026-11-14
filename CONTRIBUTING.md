@@ -77,8 +77,8 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   frozen task definition. Mutable progress lives in separate scheduler-owned
   `TaskState`/`WorkerState`/`TaskAttempt` values, which are replaced with
   `model_copy(update=...)`, never mutated. `AgentConfig.model` (default `None` = runtime default)
-  and `reasoning` (`low`…`max`) are read by the Claude Code executor; `permissions` is still
-  descriptive. `AgentConfig.persona` (≤10,000 chars, the cap keeps the CLI argument under the
+  and `reasoning` (`low`…`max`) are read by the Claude Code executor.
+  `AgentConfig.persona` (≤10,000 chars, the cap keeps the CLI argument under the
   Windows command-line limit) is sent as `--append-system-prompt`. `WorkerResult.session_id`,
   `workspace` and `diff` are set by executors, never by the model. `TaskSpec.allowed_operations`
   containing `"edit"` is what lets a Claude Code worker edit files. `TaskSpec.max_attempts`
@@ -151,11 +151,14 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   `Assignment.resume` it runs `--resume <id>` and a short "continue" prompt instead; if the CLI
   says it has no such session, it starts one fresh session in the same folder. An error result → `WORKER_FAILURE`, no result →
   `EXECUTOR_EXCEPTION`, and cancellation kills the process. The CLI is usually not on PATH: pass
-  `command=(<path to the VS Code extension's claude.exe>,)`.
+  `command=(<path to the VS Code extension's claude.exe>,)`. A `.cmd`/`.bat` launcher is
+  rejected, because cmd.exe would cut the multi-line persona. An output line that is not a JSON
+  event is skipped with a WARNING (length only).
 - **`worktrees.py`: one checkout per task.** `create`, `diff` and `remove` are thin async
   wrappers over `git`. `create` resolves the commit with `rev-parse --end-of-options` before
   `worktree add --detach`, so a commit string can't act as a flag, and requires an absolute
-  path. `diff` stages everything in the worktree's own index and diffs it against `HEAD` with
+  path. `diff` stages everything, ignored paths included (`git add -A -f`), in the worktree's
+  own index and diffs it against `HEAD` with
   external diff programs off, because worktree content is untrusted. `WorktreeExecutor(inner,
   root)` wraps another executor: it creates `root/<run_id>/<task_id>/<attempt>` (ids limited to
   `[A-Za-z0-9_-]+`), runs `inner` there and adds `workspace` and `diff` to the result. Each retry

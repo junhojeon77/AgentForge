@@ -24,8 +24,8 @@ installed. Add each only when its milestone is approved.
 
 ## Deferred from M2, M3 and the built parts of M4
 
-A per-task timeout for workers, a Claude Code demo mode,
-model-string validation and `AgentConfig.permissions`. Details are in the M2 doc's
+A per-task timeout for workers, a Claude Code demo mode and
+model-string validation. Details are in the M2 doc's
 ["Not implemented yet"](docs/milestones/M2-claude-code.md#not-implemented-yet) table.
 From M3: workers running commands themselves, a sandbox or resource limits for checks, automatic
 worktree cleanup and a live test of edit mode. Details are in the
@@ -55,6 +55,14 @@ Persistence, recovery and the lead agent are the parts of M4 still to build.
   calls the existing `agentforge.personas` functions.
 
 ## Verification history
+
+Verified on 2026-11-14 after fixing six audit findings: **140 tests passed and 1 skipped** (the
+opt-in live Claude Code test), Ruff lint passed, and all 21 Python files passed the formatting
+check. The fixes: the recorded diff includes files in ignored paths; `resume_run` leaves a task
+paused by hand alone even when `pause_run` came first; a `.cmd`/`.bat` Claude launcher is
+rejected; a CLI that exits before reading its prompt reports its own error; an output line that
+is not a JSON event is skipped; and the unused `AgentConfig.permissions` is removed. Tested with
+the fake CLI and disposable repositories only; no live call was made.
 
 Verified on 2026-11-14 after fixing four review findings on M4: **134 tests passed and 1 skipped**
 (the opt-in live Claude Code test), Ruff lint passed, and all 21 Python files passed the

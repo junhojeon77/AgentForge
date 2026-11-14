@@ -19,7 +19,7 @@ No new dependency was added; Git and `asyncio` subprocesses do the work. The sch
 |---|---|
 | `WorktreeExecutor(inner, root)` | Wraps any `WorkerExecutor`. Creates a worktree at `root/<run_id>/<task_id>/<attempt>` (the attempt folder was added in [M4](M4-orchestration.md)) from `TaskSpec.repository_reference` at `TaskSpec.base_commit` (empty means `HEAD`), runs `inner` with `workspace_reference` set to it, then sets `workspace` and `diff` on the result |
 | `worktrees.create(repo, base_commit, path)` | `git worktree add --detach`; `path` must be absolute. The commit is resolved first, so an unknown commit or a value starting with `-` is rejected |
-| `worktrees.diff(path)` | `git add -A`, then `git diff --cached --no-ext-diff --no-textconv HEAD`: every change since the base commit, new files included, ignored files excluded |
+| `worktrees.diff(path)` | `git add -A -f`, then `git diff --cached --no-ext-diff --no-textconv HEAD`: every change since the base commit, new files included. Files in ignored paths are included too (`-f`), because the checks still run them |
 | `worktrees.remove(repo, path)` | `git worktree remove --force`: deletes the worktree and its uncommitted changes |
 | `TaskSpec.allowed_operations` | `"edit"` gives the Claude Code worker `--tools Read,Glob,Grep,Edit,Write` and `--permission-mode acceptEdits`. Without it the worker is read-only, as in M2 |
 | `WorkerResult.workspace`, `WorkerResult.diff` | Set by `WorktreeExecutor`, never by the model; both are left out of the schema the model fills in |
@@ -65,7 +65,6 @@ Outcome mapping:
 | Retrying a task whose check failed | Done in [M4](M4-orchestration.md): set `TaskSpec.max_attempts` |
 | Removing worktrees automatically; merging them back | M4 (recovery) and M7 (integration) |
 | Checking natural-language acceptance criteria | Later; the validator runs commands only |
-| Using `AgentConfig.permissions` | Still descriptive. Edit rights are per task, in `allowed_operations` |
 | A per-task timeout for the worker itself | Later runtime work; checks have one, workers do not |
 
 ## Acceptance checks
@@ -74,7 +73,7 @@ Run the pytest and Ruff commands in the root README. Git tests use disposable re
 pytest temp folder. They cover:
 
 - `test_worktrees.py`: checkout at a base commit, the `HEAD` default, bad commits, relative
-  paths, the diff of modified and new files, removal, unsafe ids, a missing repository, an
+  paths, the diff of modified, new and ignored files, removal, unsafe ids, a missing repository, an
   existing worktree, two workers at once, and a full run in which a fake Claude edit shows up in
   the diff, passes a real check and leaves the original checkout clean.
 - `test_validation.py`: passing, failing and unknown checks, false worker claims, which

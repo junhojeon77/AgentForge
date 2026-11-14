@@ -10,7 +10,7 @@ state and history while retaining registered workers.
 Five defaults are provided by `register_default_workers`: backend, frontend, database, QA, and
 integration. The five are defaults, not a fixed team: any number of workers can be registered.
 Roles are arbitrary nonempty strings. Multiple workers can share a role, and the lead
-orchestrator is not registered as a worker. In M1, model names, reasoning levels, permissions,
+orchestrator is not registered as a worker. In M1, model names, reasoning levels,
 repository references, and workspace references are descriptive configuration only. M2's Claude Code
 executor reads the model, reasoning level and workspace; see [M2](M2-claude-code.md).
 

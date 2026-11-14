@@ -19,7 +19,7 @@ M2 originally named a Codex adapter on the roadmap. It was switched to Claude Co
 
 | Item | Behavior |
 |---|---|
-| `ClaudeCodeExecutor(command=("claude",), max_budget_usd=1.0, on_event=None)` | `command` is the program prefix; pass the full path to `claude.exe` when it is not on PATH |
+| `ClaudeCodeExecutor(command=("claude",), max_budget_usd=1.0, on_event=None)` | `command` is the program prefix; pass the full path to `claude.exe` when it is not on PATH. A `.cmd` or `.bat` launcher (an npm install's `claude.cmd`) is rejected with a `ValueError`: Windows runs it through cmd.exe, which would cut the multi-line persona at its first line break |
 | `AgentConfig.model` | Passed as `--model`; `None` (the new default) lets Claude Code choose |
 | `AgentConfig.reasoning` | Passed as `--effort`; must be `low`, `medium`, `high`, `xhigh` or `max` |
 | `AgentConfig.persona` | Passed as `--append-system-prompt` when not empty (max 10,000 characters); loaded from the persona folder by `agentforge.personas` |
@@ -42,7 +42,9 @@ Outcome mapping:
 - Any other `result` (an error subtype such as `error_max_budget_usd`, or no structured output)
   → `WorkerResult(success=False)` → `WORKER_FAILURE`.
 - The process exits without a `result` → `RuntimeError` with the exit code and stderr tail →
-  `EXECUTOR_EXCEPTION`.
+  `EXECUTOR_EXCEPTION`. This holds also when the CLI exits before it reads the prompt.
+- An output line that is not a JSON event is skipped, with a WARNING that gives only the
+  task id and the line's length.
 - Cancelling the task kills the Claude Code process and waits for it to exit.
 
 ## Live check (2026-11-13, Claude Code CLI 2.1.323)
@@ -75,7 +77,6 @@ are supported.
 | A per-task timeout | Later runtime work. For now `cancel_task` stops a stuck worker. |
 | A Claude Code mode for `python -m agentforge` | When wanted; the demo stays mock-only. |
 | Validating the `model` string | Not needed while arguments go straight to the executable with no shell. Revisit if a shell or remote runner is introduced. |
-| Using `AgentConfig.permissions` | Still descriptive. M3 put edit rights on the task (`allowed_operations`) instead. |
 
 ## Acceptance checks
 
