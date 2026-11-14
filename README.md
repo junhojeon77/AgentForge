@@ -155,9 +155,18 @@ async def main():
 asyncio.run(main())
 ```
 
-Each run is billed to your Claude Code login. Several M2 features are deliberately deferred, such
-as session resume (M4) and a per-task timeout. They are listed under "Not implemented yet" in
-[the M2 doc](docs/milestones/M2-claude-code.md).
+Each run is billed to your Claude Code login. Add `timeout_seconds=600` to a task to stop a worker
+that runs longer than ten minutes; the attempt then fails as `worker_timeout`.
+
+To try one task without writing Python, use the `claude` command. It loads your agents, runs one
+read-only task in the folder you name and prints the report:
+
+```powershell
+$env:AGENTFORGE_CLAUDE = "$env:USERPROFILE\.vscode\extensions\anthropic.claude-code-2.1.323-win32-x64\resources\native-binary\claude.exe"
+.\.venv\Scripts\python.exe -m agentforge claude "Summarize the README" --workspace C:\path\to\project --timeout 600
+```
+
+`--role` picks the agent (default `qa`). Details are in [the M2 doc](docs/milestones/M2-claude-code.md).
 
 ### 4. Let a worker edit code in a worktree
 
@@ -253,7 +262,7 @@ You are the backend engineer on an AgentForge team. ...
 |---|---|
 | `id` | Unique name, which is also the file name. Lowercase letters, digits, `-` and `_` only. |
 | `role` | Which tasks the agent takes. Several agents may share a role. |
-| `model` | Claude model to use. Leave it empty for Claude Code's default. |
+| `model` | Claude model to use, such as `opus` or `claude-opus-5-5`. Leave it empty for Claude Code's default. Spaces are not allowed. |
 | `reasoning` | Effort level: `low`, `medium`, `high`, `xhigh` or `max`. |
 
 The persona text (up to 10,000 characters) is added to the Claude Code worker's system prompt.
@@ -280,7 +289,7 @@ app (M6), which will call these same functions.
 - [M1: domain and scheduler](docs/milestones/M1-domain.md): contracts, scheduling policy, limits
   and acceptance checks.
 - [M2: Claude Code adapter](docs/milestones/M2-claude-code.md): executor contract, CLI flags,
-  outcome mapping, the live check and deferred work.
+  outcome mapping, the live check, the timeout and the `claude` command.
 - [M3: worktrees and validation](docs/milestones/M3-worktrees.md): worktrees, edit mode, diffs,
   check commands, risks and deferred work.
 - [M4: retries and pause/resume](docs/milestones/M4-orchestration.md): retry rules, pause and

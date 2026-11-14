@@ -30,7 +30,7 @@ Which failures are retried:
 
 | Failure | Retried |
 |---|---|
-| `WORKER_FAILURE`, `INVALID_RESULT`, `VALIDATION_REJECTED`, `EXECUTOR_EXCEPTION` | Yes, while attempts remain |
+| `WORKER_FAILURE`, `INVALID_RESULT`, `VALIDATION_REJECTED`, `EXECUTOR_EXCEPTION`, `WORKER_TIMEOUT` | Yes, while attempts remain |
 | `VALIDATOR_EXCEPTION` | No. A check that cannot start is a setup problem, and a rerun would bill the worker again |
 | Cancellation | No. A task cancelled while it waits for its retry stays cancelled, and the failed attempt keeps its record |
 
@@ -106,7 +106,7 @@ The report answers these after the run, with no logging set up:
 
 | Question | Where the answer is |
 |---|---|
-| Why did attempt N fail? | `TaskAttempt.failure_reason` and `TaskAttempt.message`: the worker's message, the exception text, or the failed checks with the last 2,000 characters of their output |
+| Why did attempt N fail? | `TaskAttempt.failure_reason` and `TaskAttempt.message`: the worker's message, the exception text, the failed checks with the last 2,000 characters of their output, or `worker timed out after 30s` (`worker_timeout`, from `TaskSpec.timeout_seconds`) |
 | Was it retried, and why or why not? | `Transition.detail` on the transition after the failure: `attempt 1 of 3 failed (validation_rejected); retrying`, `attempt 3 of 3 failed (validation_rejected); no attempts left`, or `attempt 1 of 2 failed (validator_exception); not retried: validator errors are setup problems` |
 | Where did attempt N run, and what did it change? | `TaskAttempt.result.workspace`, `.diff` and `.session_id` |
 | What was the worker told on the retry? | `Assignment.previous_failure`, which equals the failed attempt's `message` |
@@ -192,7 +192,6 @@ because those can contain secrets. Read those in the report.
 | A pause that lets running work finish first | When wanted; today a pause always stops the worker |
 | A delay or backoff between attempts | When a real rate-limit failure shows the need |
 | A manual "retry this task" command | M5, with the REST commands |
-| A per-task timeout for the worker | Later runtime work |
 | Removing worktrees automatically | M4 (recovery) |
 
 ## Acceptance checks

@@ -68,15 +68,23 @@ which is not on PATH by default. Each task is billed to that login; `max_budget_
 Five concurrent workers mean up to five concurrent Claude Code sessions. Event lines up to 16 MiB
 are supported.
 
+The opt-in live test has never been run; one-off approved calls checked the flags instead.
+Personas (`--append-system-prompt`) and `python -m agentforge claude` have not been tried
+against the live CLI. Both are tested only with the fake CLI.
+
+## Finished after M2 (2026-11-14)
+
+The three items M2 had deferred are now built.
+
+| Item | Behavior |
+|---|---|
+| `TaskSpec.timeout_seconds` | Optional, a positive number of seconds; `None` (the default) means no limit. It applies to each attempt's worker, not to validation (checks have their own timeout). When it runs out, the scheduler cancels the worker, which kills the Claude Code process, and the attempt fails as `WORKER_TIMEOUT` with the message `worker timed out after 30s`. It is retried like any other failure while attempts remain. A `TimeoutError` the worker raises itself stays an `EXECUTOR_EXCEPTION` |
+| `AgentConfig.model` | Must start with a letter or digit and contain only letters, digits and `. _ : / @ [ ] -`. This accepts aliases such as `opus` and ids such as `claude-opus-5-5[1m]`, and rejects spaces, line breaks and a value that could be read as a flag. A persona file with a bad model fails to load, naming the file. It does not check that the model exists |
+| `python -m agentforge claude "<task>"` | Runs one read-only task with Claude Code and prints the report as JSON. Options: `--workspace` (default: the current folder), `--role` (default `qa`), `--timeout` seconds, and `--command` (default: `$AGENTFORGE_CLAUDE`, else `claude`). Workers come from the persona folder, or the five defaults when it has none. It prints a billing notice first. A missing folder or a role no agent has stops it before Claude starts (exit 2). Exit 0 when the task completed, 1 otherwise |
+
 ## Not implemented yet
 
-| Deferred | Waits for |
-|---|---|
-| Session resume | Done in [M4](M4-orchestration.md): a paused task continues its session with `--resume`. Retries are also done there; each one starts a new session. |
-| Edit permissions and worktrees | Done in [M3](M3-worktrees.md): a task can allow `"edit"`. Workers still cannot run commands. |
-| A per-task timeout | Later runtime work. For now `cancel_task` stops a stuck worker. |
-| A Claude Code mode for `python -m agentforge` | When wanted; the demo stays mock-only. |
-| Validating the `model` string | Not needed while arguments go straight to the executable with no shell. Revisit if a shell or remote runner is introduced. |
+Nothing from M2 is deferred.
 
 ## Acceptance checks
 
@@ -85,7 +93,13 @@ Run the pytest and Ruff commands in the root README. Offline tests replace the C
 - the arguments, working directory, prompt, session ID and event callback;
 - an error result as `WORKER_FAILURE` and a crash as `EXECUTOR_EXCEPTION`;
 - cancellation killing the process;
-- a missing workspace and a missing executable.
+- a missing workspace and a missing executable;
+- a timeout that kills the process, and `python -m agentforge claude` run against the fake CLI,
+  with an unknown role and a missing folder rejected before any process starts.
+
+`test_contracts.py` covers the `timeout_seconds` bounds and the `model` rule;
+`test_scheduler.py` covers a timed-out worker being stopped, failed, logged and retried, and a
+worker's own `TimeoutError` staying an executor exception.
 
 The live test `test_live_claude_code_reads_the_workspace` runs only when you set
 `AGENTFORGE_LIVE_CLAUDE=1` and `AGENTFORGE_CLAUDE=<path to claude.exe>`.

@@ -62,10 +62,8 @@ Outcome mapping:
 | Deferred | Waits for |
 |---|---|
 | Workers running commands (tests, builds) themselves | A sandbox decision. Until then only the validator runs commands |
-| Retrying a task whose check failed | Done in [M4](M4-orchestration.md): set `TaskSpec.max_attempts` |
 | Removing worktrees automatically; merging them back | M4 (recovery) and M7 (integration) |
 | Checking natural-language acceptance criteria | Later; the validator runs commands only |
-| A per-task timeout for the worker itself | Later runtime work; checks have one, workers do not |
 
 ## Acceptance checks
 

@@ -91,7 +91,8 @@ Cancelling it again stops `run` from waiting but does not interrupt that cleanup
 refused with `ValueError` until the cleanup finishes.
 
 Executors and validators must cooperate with asyncio cancellation. Cleanup that never finishes can
-keep cancellation waiting; forced process termination and timeouts are future runtime concerns. Use
+keep cancellation waiting. A task can set `timeout_seconds` to stop a worker that runs too long
+(see [M2](M2-claude-code.md#finished-after-m2-2026-11-14)). Use
 all scheduler methods from the same event loop, not arbitrary threads. Worker reservations are
 released on every completed cleanup path, including cancellation before a coroutine starts.
 

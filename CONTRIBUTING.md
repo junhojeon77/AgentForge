@@ -18,6 +18,7 @@ python -m venv .venv
 ```powershell
 .\.venv\Scripts\python.exe -m agentforge                      # five-worker mock demo, prints JSON report
 .\.venv\Scripts\python.exe -m agentforge setup                # copy default personas to %APPDATA%\AgentForge\agents
+.\.venv\Scripts\python.exe -m agentforge claude "<task>"       # one read-only Claude Code task (billed)
 .\.venv\Scripts\python.exe -m pytest apps/api/tests          # all tests
 .\.venv\Scripts\python.exe -m pytest apps/api/tests/test_scheduler.py::test_empty_plan   # single test
 .\.venv\Scripts\python.exe -m ruff check apps/api
@@ -76,8 +77,10 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   printed in logs and transition reasons. `TaskSpec` is the
   frozen task definition. Mutable progress lives in separate scheduler-owned
   `TaskState`/`WorkerState`/`TaskAttempt` values, which are replaced with
-  `model_copy(update=...)`, never mutated. `AgentConfig.model` (default `None` = runtime default)
-  and `reasoning` (`low`…`max`) are read by the Claude Code executor.
+  `model_copy(update=...)`, never mutated. `AgentConfig.model` (default `None` = runtime default;
+  model ids and aliases only, never a value that reads as a flag) and `reasoning` (`low`…`max`)
+  are read by the Claude Code executor. `TaskSpec.timeout_seconds` (optional) limits each
+  attempt's worker.
   `AgentConfig.persona` (≤10,000 chars, the cap keeps the CLI argument under the
   Windows command-line limit) is sent as `--append-system-prompt`. `WorkerResult.session_id`,
   `workspace` and `diff` are set by executors, never by the model. `TaskSpec.allowed_operations`
@@ -100,7 +103,9 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   - `_execute()` runs RUNNING → executor → result validation → VALIDATING → validator →
     COMPLETED/FAILED. Its `finally` fails a task that is still RUNNING or VALIDATING (a
     `BaseException` that bypassed the handlers), releases the worker, drops the active task and
-    sets `_wake`. The worker stays reserved through validation.
+    sets `_wake`. The worker stays reserved through validation. The executor call runs inside
+    `asyncio.timeout(task.timeout_seconds)`; when that limit expires the attempt fails as
+    `WORKER_TIMEOUT`, and a `TimeoutError` the worker raised itself stays `EXECUTOR_EXCEPTION`.
   - `_fail()` decides retries. With attempts left, and unless the reason is
     `VALIDATOR_EXCEPTION`, it marks the attempt FAILED and puts the task back to READY, never
     FAILED, because FAILED is terminal and would block descendants. Otherwise the task fails.
@@ -177,8 +182,11 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   restores removed agents. `save_agent` writes a temp file, then `os.replace`. `load_agents`
   raises `ValueError` naming the bad file. M5/M6 will call these functions; there is no API or UI
   yet.
-- **`__main__.py`** wires the mocks into a five-task plan to demonstrate concurrent execution;
-  `python -m agentforge setup` creates the persona folder at `default_folder()`.
+- **`__main__.py`**: `cli()` parses the command line with `argparse`. No arguments runs the
+  mock five-task demo (`main()`); `setup` creates the persona folder at `default_folder()`;
+  `claude "<task>"` runs one read-only task with `ClaudeCodeExecutor` for every agent in the
+  persona folder (or the defaults) and prints the report. A missing folder or an unknown role
+  stops it before Claude starts.
 
 Tests are in `apps/api/tests/`:
 - `test_contracts.py`: contract validation and immutability.
