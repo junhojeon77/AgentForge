@@ -193,6 +193,10 @@ async def test_failure_blocks_descendants_releases_worker_and_continues(
     assert [a.task.id for a in executor.assignments] == ["a", "z"]
     assert all(w.task_id is None for w in report.workers)
     assert all(a.number == 1 for a in report.attempts)
+    why = "blocked by a, which is FAILED"
+    assert states["b"].message == states["c"].message == why
+    assert [t.detail for t in report.transitions if t.status == TaskStatus.BLOCKED] == [why, why]
+    assert all(t.detail for t in report.transitions)
 
 
 async def test_required_evidence_is_independently_validated():
@@ -262,6 +266,13 @@ async def test_cancel_active_task_awaits_cleanup_and_blocks_descendants(during_v
     states = {t.task.id: t.status for t in report.tasks}
     assert states == {"a": TaskStatus.CANCELLED, "b": TaskStatus.BLOCKED, "z": TaskStatus.COMPLETED}
     assert all(w.task_id is None for w in report.workers)
+    messages = {t.task.id: t.message for t in report.tasks}
+    assert messages["a"] == report.attempts[0].message == "cancel_task was called"
+    assert messages["b"] == "blocked by a, which is CANCELLED"
+    assert [t.detail for t in report.transitions if t.status == TaskStatus.CANCELLED] == [
+        "cancel_task was called"
+    ]
+    assert all(t.detail for t in report.transitions)
 
 
 async def test_cancel_pending_task_and_entire_run():
@@ -279,6 +290,12 @@ async def test_cancel_pending_task_and_entire_run():
     assert all(t.status in {TaskStatus.CANCELLED, TaskStatus.BLOCKED} for t in report.tasks)
     assert all(w.task_id is None for w in report.workers)
     assert len(report.attempts) == 1
+    assert {t.task.id: t.message for t in report.tasks} == {
+        "a": "cancel_run was called",
+        "b": "cancel_task was called",
+        "c": "blocked by b, which is CANCELLED",
+    }
+    assert all(t.detail for t in report.transitions)
 
 
 async def test_caller_cancellation_cleans_active_work():
@@ -291,6 +308,34 @@ async def test_caller_cancellation_cleans_active_work():
         await running
     assert executor.finished.is_set()
     assert engine.snapshot().workers[0].task_id is None
+    assert engine.snapshot().tasks[0].message == "run() stopped by CancelledError"
+    assert engine.snapshot().transitions[-1].detail == "run() stopped by CancelledError"
+
+
+async def test_worker_task_cancelled_from_outside_says_so():
+    executor = MockExecutor(gate=asyncio.Event())
+    engine = scheduler(executor)
+    running = asyncio.create_task(engine.run(plan(task("a"))))
+    await asyncio.wait_for(executor.started.wait(), 2)
+    (worker_task,) = (t for t in asyncio.all_tasks() if t.get_name() == "agentforge:run:a")
+    worker_task.cancel()
+    report = await asyncio.wait_for(running, 2)
+    assert report.tasks[0].status == TaskStatus.CANCELLED
+    assert report.tasks[0].message == "worker task was cancelled"
+    assert report.transitions[-1].detail == "worker task was cancelled"
+
+
+async def test_every_transition_of_a_completed_task_says_why():
+    report = await scheduler().run(plan(task("a", max_attempts=3)))
+    assert [(t.status, t.detail) for t in report.transitions] == [
+        (TaskStatus.PENDING, "queued"),
+        (TaskStatus.READY, "no unfinished dependencies"),
+        (TaskStatus.ASSIGNED, "attempt 1 of 3 assigned to worker worker"),
+        (TaskStatus.RUNNING, "worker started"),
+        (TaskStatus.VALIDATING, "worker reported success; validating"),
+        (TaskStatus.COMPLETED, "validation accepted"),
+    ]
+    assert report.tasks[0].message == ""
 
 
 async def test_completed_task_is_not_overwritten_by_cancellation():
@@ -559,7 +604,7 @@ async def test_task_fails_and_blocks_descendants_when_attempts_run_out():
     assert [(a.number, a.status) for a in report.attempts] == [
         (number, TaskStatus.FAILED) for number in (1, 2, 3)
     ]
-    assert [t.detail for t in report.transitions if t.detail] == [
+    assert [t.detail for t in report.transitions if "failed (" in t.detail] == [
         "attempt 1 of 3 failed (worker_failure); retrying",
         "attempt 2 of 3 failed (worker_failure); retrying",
         "attempt 3 of 3 failed (worker_failure); no attempts left",
@@ -658,6 +703,15 @@ async def test_retry_is_logged_without_the_failure_text(caplog):
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert warnings == ["run run task a: attempt 1 of 2 failed (worker_failure); retrying"]
     debug = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
-    assert "run run task a: RUNNING (attempt 2, worker worker)" in debug
-    assert "run run task a: COMPLETED (attempt 2, worker worker)" in debug
+    assert "run run task a: RUNNING (attempt 2, worker worker): worker started" in debug
+    assert "run run task a: COMPLETED (attempt 2, worker worker): validation accepted" in debug
+    assert "SECRET-TOKEN" not in caplog.text
+
+    await scheduler(FlakyExecutor(message="SECRET-TOKEN")).run(
+        plan(task("a"), task("b", dependencies=("a",)))
+    )
+    assert (
+        "run run task b: BLOCKED (attempt 0, worker None): blocked by a, which is FAILED"
+        in caplog.messages
+    )
     assert "SECRET-TOKEN" not in caplog.text

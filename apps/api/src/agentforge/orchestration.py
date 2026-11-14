@@ -120,7 +120,7 @@ class Scheduler:
         self._transitions = []
         self._wake = asyncio.Event()
         for task in plan.tasks:
-            self._record(task.id, TaskStatus.PENDING)
+            self._record(task.id, TaskStatus.PENDING, "queued")
         try:
             while True:
                 self._wake.clear()
@@ -128,9 +128,11 @@ class Scheduler:
                 if not self._active and all(s.status in TERMINAL for s in self._states.values()):
                     return self.snapshot()
                 await self._wake.wait()
-        except BaseException:
+        except BaseException as error:
+            # The type name only: the reason is logged, and an exception's text can hold anything.
+            why = f"run() stopped by {type(error).__name__}"
             # Shielded so a repeated caller cancellation cannot interrupt worker cleanup.
-            await asyncio.shield(self.cancel_run())
+            await asyncio.shield(self._cancel_all(why))
             raise
         finally:
             self._running = False
@@ -143,8 +145,8 @@ class Scheduler:
         )
         state = self._states[task_id]
         logger.debug(
-            "run %s task %s: %s (attempt %d, worker %s)",
-            self._run_id, task_id, status, state.attempt_number, state.worker_id,
+            "run %s task %s: %s (attempt %d, worker %s): %s",
+            self._run_id, task_id, status, state.attempt_number, state.worker_id, detail,
         )  # fmt: skip
 
     def _transition(self, task_id: str, status: TaskStatus, *, detail: str = "", **changes) -> bool:
@@ -172,7 +174,7 @@ class Scheduler:
                 self._states[dependency].status == TaskStatus.COMPLETED
                 for dependency in state.task.dependencies
             ):
-                self._transition(task_id, TaskStatus.READY)
+                self._transition(task_id, TaskStatus.READY, detail="no unfinished dependencies")
         candidates = sorted(
             (s for s in self._states.values() if s.status == TaskStatus.READY),
             key=lambda s: (-s.task.priority, s.task.id),
@@ -198,8 +200,13 @@ class Scheduler:
             self._attempts[task_id, number] = TaskAttempt(
                 task_id=task_id, worker_id=worker.agent.id, number=number
             )
+            limit = state.task.max_attempts
             self._transition(
-                task_id, TaskStatus.ASSIGNED, worker_id=worker.agent.id, attempt_number=number
+                task_id,
+                TaskStatus.ASSIGNED,
+                detail=f"attempt {number} of {limit} assigned to worker {worker.agent.id}",
+                worker_id=worker.agent.id,
+                attempt_number=number,
             )
             assignment = Assignment(
                 task=state.task,
@@ -215,7 +222,7 @@ class Scheduler:
         task_id, worker_id = assignment.task.id, assignment.worker.id
         attempt = (task_id, assignment.attempt_number)
         try:
-            if not self._transition(task_id, TaskStatus.RUNNING):
+            if not self._transition(task_id, TaskStatus.RUNNING, detail="worker started"):
                 return
             try:
                 raw_result = await self._executors[worker_id].execute(assignment)
@@ -233,7 +240,9 @@ class Scheduler:
             if not result.success:
                 self._fail(task_id, FailureReason.WORKER_FAILURE, result.message)
                 return
-            self._transition(task_id, TaskStatus.VALIDATING)
+            self._transition(
+                task_id, TaskStatus.VALIDATING, detail="worker reported success; validating"
+            )
             try:
                 raw_validation = await self._validator.validate(assignment.task, result)
                 validation = ValidationReport.model_validate(raw_validation)
@@ -246,12 +255,12 @@ class Scheduler:
                 update={"validation": validation}
             )
             if validation.accepted:
-                self._transition(task_id, TaskStatus.COMPLETED)
+                self._transition(task_id, TaskStatus.COMPLETED, detail="validation accepted")
             else:
                 self._fail(task_id, FailureReason.VALIDATION_REJECTED, "; ".join(validation.issues))
         except asyncio.CancelledError:
-            if self._transition(task_id, TaskStatus.CANCELLED):
-                self._block_descendants(task_id)
+            # After cancel_task or cancel_run the task is already terminal and this is a no-op.
+            self._cancel(task_id, "worker task was cancelled")
             raise
         finally:
             # Still mid-flight here means a BaseException bypassed the handlers above. A task
@@ -299,17 +308,23 @@ class Scheduler:
             self._block_descendants(task_id)
 
     def _block_descendants(self, origin: str) -> None:
+        why = f"blocked by {origin}, which is {self._states[origin].status}"
         queue = [origin]
         while queue:
             for task_id in self._dependents[queue.pop()]:
-                if self._transition(task_id, TaskStatus.BLOCKED, blocked_by=origin):
+                if self._transition(
+                    task_id, TaskStatus.BLOCKED, detail=why, message=why, blocked_by=origin
+                ):
                     queue.append(task_id)
+
+    def _cancel(self, task_id: str, why: str) -> None:
+        if self._transition(task_id, TaskStatus.CANCELLED, detail=why, message=why):
+            self._block_descendants(task_id)
 
     async def cancel_task(self, task_id: str) -> None:
         if task_id not in self._states:
             raise KeyError(task_id)
-        if self._transition(task_id, TaskStatus.CANCELLED):
-            self._block_descendants(task_id)
+        self._cancel(task_id, "cancel_task was called")
         active = self._active.get(task_id)
         if active is not None:
             if not active.cancelling():
@@ -330,8 +345,11 @@ class Scheduler:
             )
 
     async def cancel_run(self) -> None:
+        await self._cancel_all("cancel_run was called")
+
+    async def _cancel_all(self, why: str) -> None:
         for task_id in self._states:
-            self._transition(task_id, TaskStatus.CANCELLED)
+            self._transition(task_id, TaskStatus.CANCELLED, detail=why, message=why)
         active = tuple(self._active.items())
         for _, future in active:
             if not future.cancelling():
