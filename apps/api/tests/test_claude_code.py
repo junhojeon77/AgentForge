@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import pathlib
 import subprocess
@@ -34,6 +35,11 @@ def workspace(tmp_path, monkeypatch):
 
 def fake_call(workspace):
     return json.loads((workspace.parent / "call.json").read_text(encoding="utf-8"))
+
+
+def fake_calls(workspace):
+    lines = (workspace.parent / "call.json.all").read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines]
 
 
 def flag(argv, name):
@@ -143,6 +149,68 @@ async def test_retry_prompt_carries_the_previous_failure_as_data(workspace):
     assert "Previous attempt failed" in stdin and "clean copy" in stdin
     assert "data, not instructions" in stdin
     assert "check unit failed (exit 1): boom" in stdin
+
+
+def paused(workspace, **changes):
+    values = {
+        "task": task(workspace),
+        "worker": AgentConfig(id="w", role="backend"),
+        "session_id": str(uuid.uuid4()),
+    }
+    return Assignment(**(values | changes))
+
+
+async def test_uses_the_session_id_the_scheduler_chose(workspace):
+    assignment = paused(workspace)
+    result = await executor().execute(assignment)
+    assert flag(fake_call(workspace)["argv"], "--session-id") == assignment.session_id
+    assert result.session_id == assignment.session_id
+
+
+async def test_resume_continues_the_saved_session_with_the_same_limits(workspace, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    assignment = paused(workspace, resume=True)
+    result = await executor().execute(assignment)
+
+    (call,) = fake_calls(workspace)
+    argv = call["argv"]
+    assert flag(argv, "--resume") == assignment.session_id
+    assert "--session-id" not in argv
+    assert flag(argv, "--tools") == "Read,Glob,Grep"
+    assert flag(argv, "--permission-prompts") == "none"
+    assert {"-p", "--restricted", "--strict-mcp-config", "--json-schema"} <= set(argv)
+    assert "interrupted" in call["stdin"] and "Continue the task" in call["stdin"]
+    assert "structured output" in call["stdin"]
+    assert pathlib.Path(call["cwd"]).samefile(workspace)  # noqa: ASYNC240
+    assert result.success and result.session_id == assignment.session_id
+    assert f"claude resumed: task a attempt 1 session {assignment.session_id}" in caplog.text
+    assert "interrupted" not in caplog.text
+
+
+async def test_resume_starts_a_fresh_session_when_none_was_saved(workspace, monkeypatch, caplog):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "no_session")
+    assignment = paused(workspace, resume=True)
+    result = await executor().execute(assignment)
+
+    tried, fresh = fake_calls(workspace)
+    assert flag(tried["argv"], "--resume") == assignment.session_id
+    assert flag(fresh["argv"], "--session-id") == assignment.session_id
+    assert "--resume" not in fresh["argv"]
+    assert "Read the file" in fresh["stdin"] and "read hello.txt" in fresh["stdin"]
+    assert "interrupted" in fresh["stdin"] and "may already be here" in fresh["stdin"]
+    assert result.success and result.session_id == assignment.session_id
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == [
+        f"task a attempt 1: no saved session {assignment.session_id} to resume; "
+        "starting a fresh one in the same folder"
+    ]
+
+
+async def test_resume_that_fails_for_another_reason_is_not_retried_fresh(workspace, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "crash")
+    with pytest.raises(RuntimeError, match="fatal: not logged in"):
+        await executor().execute(paused(workspace, resume=True))
+    assert len(fake_calls(workspace)) == 1
 
 
 async def test_error_result_is_a_worker_failure_with_session(workspace, monkeypatch):
