@@ -4,11 +4,14 @@ Checks run code the worker may have just written, with this process's rights and
 """
 
 import asyncio
+import logging
 import pathlib
 from asyncio.subprocess import DEVNULL, PIPE, STDOUT
 from collections.abc import Mapping, Sequence
 
 from agentforge.domain import TaskSpec, ValidationReport, WorkerResult
+
+logger = logging.getLogger(__name__)
 
 
 class CommandValidator:
@@ -41,6 +44,7 @@ class CommandValidator:
         try:
             output, _ = await asyncio.wait_for(proc.communicate(), self.timeout)
         except TimeoutError:
+            logger.debug("check %s in %s: timed out after %gs", name, workspace, self.timeout)
             return f"check {name} timed out after {self.timeout:g}s"
         finally:
             # shortcut: kills only the started process, not its children; use a Windows job
@@ -48,6 +52,8 @@ class CommandValidator:
             if proc.returncode is None:
                 proc.kill()
                 await proc.wait()
+        # The exit code only: check output can hold secrets and goes to the report instead.
+        logger.debug("check %s in %s: exit %s", name, workspace, proc.returncode)
         if proc.returncode:
             tail = output.decode("utf-8", errors="replace").strip()[-2000:]
             return f"check {name} failed (exit {proc.returncode}): {tail}"

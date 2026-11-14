@@ -1,12 +1,15 @@
 """Git worktrees: one checkout per task. They isolate changes, not execution."""
 
 import asyncio
+import logging
 import re
 from asyncio.subprocess import PIPE
 from pathlib import Path
 
 from agentforge.domain import Assignment, WorkerResult
 from agentforge.orchestration import WorkerExecutor
+
+logger = logging.getLogger(__name__)
 
 # Ids become folder names under the root, so nothing that could climb out of it.
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
@@ -35,6 +38,7 @@ async def create(repo: str | Path, base_commit: str, path: str | Path) -> Path:
     commit = f"{base_commit or 'HEAD'}^{{commit}}"
     sha = (await _git(repo, "rev-parse", "--verify", "--end-of-options", commit)).strip()
     await _git(repo, "worktree", "add", "--detach", str(path), sha)
+    logger.debug("worktree created: %s at %s", path, sha)
     return path
 
 
@@ -42,7 +46,10 @@ async def diff(path: str | Path) -> str:
     """Everything changed in the worktree since its base commit, new files included."""
     await _git(path, "add", "-A")
     # The worktree's content is untrusted: never run diff programs its attributes select.
-    return await _git(path, "diff", "--cached", "--no-ext-diff", "--no-textconv", "HEAD")
+    changes = await _git(path, "diff", "--cached", "--no-ext-diff", "--no-textconv", "HEAD")
+    # The length only: a diff can hold secrets.
+    logger.debug("diff recorded: %s (%d characters)", path, len(changes))
+    return changes
 
 
 async def remove(repo: str | Path, path: str | Path) -> None:
@@ -51,7 +58,7 @@ async def remove(repo: str | Path, path: str | Path) -> None:
 
 
 class WorktreeExecutor:
-    """Runs another executor inside a fresh worktree at root/<run_id>/<task_id>.
+    """Runs another executor inside a fresh worktree at root/<run_id>/<task_id>/<attempt>.
 
     The worktree is kept afterwards for validation and review; call `remove` to delete it.
     Share one instance per repository: it serializes `git worktree add`.
@@ -69,7 +76,7 @@ class WorktreeExecutor:
         for value in (task.run_id, task.id):
             if not _SAFE_ID.fullmatch(value):
                 raise ValueError(f"worktree id {value!r} may use only A-Z, a-z, 0-9, '-' and '_'")
-        path = self.root / task.run_id / task.id
+        path = self.root / task.run_id / task.id / str(assignment.attempt_number)
         async with self._creating:
             await create(task.repository_reference, task.base_commit, path)
         inner_task = task.model_copy(update={"workspace_reference": str(path)})

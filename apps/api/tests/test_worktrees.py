@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import pathlib
 import subprocess
 import sys
@@ -8,7 +9,14 @@ from test_claude_code import FAKE_CLAUDE, fake_call
 
 from agentforge import worktrees
 from agentforge.claude_code import ClaudeCodeExecutor
-from agentforge.domain import AgentConfig, Assignment, RunPlan, TaskSpec, TaskStatus
+from agentforge.domain import (
+    AgentConfig,
+    Assignment,
+    FailureReason,
+    RunPlan,
+    TaskSpec,
+    TaskStatus,
+)
 from agentforge.mocks import MockExecutor
 from agentforge.orchestration import Scheduler
 from agentforge.validation import CommandValidator
@@ -141,11 +149,11 @@ async def test_workers_get_separate_worktrees_at_once(repo, tmp_path):
 
     assert report.successful
     seen = {a.task.workspace_reference for a in inner.assignments}
-    assert seen == {str(tmp_path / "trees" / "run" / name) for name in ("a", "b")}
+    assert seen == {str(tmp_path / "trees" / "run" / name / "1") for name in ("a", "b")}
 
 
 async def test_edit_run_records_the_diff_and_passes_a_real_check(repo, tmp_path, monkeypatch):
-    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "trees" / "run" / "call.json"))
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "trees" / "run" / "a" / "call.json"))
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "edit")
     exists = "import pathlib, sys; sys.exit(not pathlib.Path('fake_edit.txt').exists())"
     engine = Scheduler(
@@ -160,10 +168,57 @@ async def test_edit_run_records_the_diff_and_passes_a_real_check(repo, tmp_path,
     report = await asyncio.wait_for(engine.run(RunPlan(id="run", tasks=(edit,))), 30)
 
     result = report.attempts[0].result
-    tree = tmp_path / "trees" / "run" / "a"
+    tree = tmp_path / "trees" / "run" / "a" / "1"
     assert report.tasks[0].status == TaskStatus.COMPLETED, report.tasks[0].message
     assert result.workspace == str(tree)
     assert "fake_edit.txt" in result.diff and "+edited by fake claude" in result.diff
     assert pathlib.Path(fake_call(tree)["cwd"]).samefile(tree)  # noqa: ASYNC240
     assert not (repo / "fake_edit.txt").exists()
+    assert git(repo, "status", "--porcelain") == ""
+
+
+async def test_retry_starts_in_a_fresh_worktree_and_tells_the_worker_why(
+    repo, tmp_path, monkeypatch, caplog
+):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "call.json"))
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "edit")
+    # Fails the first time it runs and passes afterwards; the marker lives outside the worktrees.
+    flaky = (
+        "import pathlib, sys; marker = pathlib.Path(sys.argv[1]); seen = marker.exists(); "
+        "marker.touch(); print('CHECK-OUTPUT-MARKER'); sys.exit(not seen)"
+    )
+    check = (sys.executable, "-c", flaky, str(tmp_path / "ran-once"))
+    engine = Scheduler(validator=CommandValidator(checks={"flaky": check}))
+    claude = ClaudeCodeExecutor(command=(sys.executable, str(FAKE_CLAUDE)))
+    engine.register_worker(
+        AgentConfig(id="w", role="backend"), WorktreeExecutor(claude, tmp_path / "trees")
+    )
+    edit = task(
+        repo,
+        allowed_operations=("edit",),
+        execution_constraints=("check:flaky",),
+        max_attempts=2,
+    )
+
+    report = await asyncio.wait_for(engine.run(RunPlan(id="run", tasks=(edit,))), 60)
+
+    trees = tmp_path / "trees" / "run" / "a"
+    first, second = report.attempts
+    assert report.tasks[0].status == TaskStatus.COMPLETED, report.tasks[0].message
+    assert (first.status, first.failure_reason) == (
+        TaskStatus.FAILED,
+        FailureReason.VALIDATION_REJECTED,
+    )
+    assert "CHECK-OUTPUT-MARKER" in first.message
+    assert first.result.workspace == str(trees / "1")
+    assert second.result.workspace == str(trees / "2")
+    # A clean copy: the second attempt's diff adds the file again instead of finding it there.
+    assert "+edited by fake claude" in first.result.diff
+    assert "+edited by fake claude" in second.result.diff
+    call = fake_call(tmp_path / "trees")
+    assert pathlib.Path(call["cwd"]).samefile(trees / "2")  # noqa: ASYNC240
+    assert "CHECK-OUTPUT-MARKER" in call["stdin"]
+    assert str(trees / "2") in caplog.text and "check flaky" in caplog.text
+    assert "CHECK-OUTPUT-MARKER" not in caplog.text
     assert git(repo, "status", "--porcelain") == ""
