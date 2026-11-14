@@ -859,6 +859,38 @@ async def test_pause_run_stops_everything_and_resume_run_leaves_tasks_paused_by_
     assert all(t.detail for t in report.transitions)
 
 
+async def test_resume_run_leaves_a_task_paused_by_hand_after_pause_run(caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    executor = GatedExecutor()
+    engine = scheduler(executor)
+    running = asyncio.create_task(engine.run(plan(task("a"))))
+    await asyncio.wait_for(executor.started["a"].wait(), 2)
+
+    await engine.pause_run()
+    await engine.pause_task("a")
+    executor.gates["a"].set()
+    await engine.resume_run()
+    await loop_turn()
+    await loop_turn()
+
+    held = by_id(engine.snapshot())["a"]
+    assert not running.done()
+    assert held.status == TaskStatus.PAUSED
+    assert held.message == "pause_task was called while PAUSED"
+    assert (
+        "run run task a: PAUSED (attempt 1, worker None): pause_task was called while PAUSED"
+        in caplog.messages
+    )
+
+    await engine.resume_task("a")
+    report = await asyncio.wait_for(running, 2)
+    assert report.successful
+    assert [t.detail for t in report.transitions if t.status == TaskStatus.PAUSED] == [
+        "pause_run was called while RUNNING",
+        "pause_task was called while PAUSED",
+    ]
+
+
 async def test_resumed_task_goes_back_to_the_worker_that_started_it():
     executor = GatedExecutor("b")
     engine = scheduler(executor)

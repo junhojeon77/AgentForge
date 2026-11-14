@@ -411,6 +411,11 @@ class Scheduler:
         """Hold a task. A running worker is stopped; resume continues the same attempt."""
         if task_id not in self._states:
             raise KeyError(task_id)
+        if task_id in self._run_paused:
+            # Held by pause_run until now: holding it by hand takes it out of resume_run's reach.
+            self._run_paused.discard(task_id)
+            why = f"pause_task was called while {TaskStatus.PAUSED}"
+            self._transition(task_id, TaskStatus.PAUSED, detail=why, message=why)
         self._hold([task_id], "pause_task was called")
         # Also when it was paused already: a repeated pause waits for the same cleanup.
         await self._stop([task_id])
