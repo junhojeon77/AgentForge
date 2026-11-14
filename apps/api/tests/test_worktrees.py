@@ -101,6 +101,21 @@ async def test_diff_includes_modified_and_new_files(repo, tmp_path):
     assert "new.txt" in diff and "+fresh" in diff
 
 
+async def test_diff_includes_files_in_ignored_paths(repo, tmp_path):
+    (repo / ".gitignore").write_text("build/\n.env\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "ignore build output")
+    path = await worktrees.create(repo, "", tmp_path / "tree")
+    (path / "build").mkdir()
+    (path / "build" / "conftest.py").write_text("hidden = True\n", encoding="utf-8")
+    (path / ".env").write_text("KEY=1\n", encoding="utf-8")
+
+    diff = await worktrees.diff(path)
+
+    assert "build/conftest.py" in diff and "+hidden = True" in diff
+    assert ".env" in diff and "+KEY=1" in diff
+
+
 async def test_remove_deletes_a_changed_worktree(repo, tmp_path):
     path = await worktrees.create(repo, "", tmp_path / "tree")
     (path / "new.txt").write_text("fresh\n", encoding="utf-8")

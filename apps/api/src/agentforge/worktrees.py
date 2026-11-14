@@ -43,8 +43,9 @@ async def create(repo: str | Path, base_commit: str, path: str | Path) -> Path:
 
 
 async def diff(path: str | Path) -> str:
-    """Everything changed in the worktree since its base commit, new files included."""
-    await _git(path, "add", "-A")
+    """Everything changed in the worktree since its base commit, new and ignored files included."""
+    # -f: a file in an ignored path still runs in the checks, so it must be in the review record.
+    await _git(path, "add", "-A", "-f")
     # The worktree's content is untrusted: never run diff programs its attributes select.
     changes = await _git(path, "diff", "--cached", "--no-ext-diff", "--no-textconv", "HEAD")
     # The length only: a diff can hold secrets.
