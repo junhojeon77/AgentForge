@@ -289,9 +289,10 @@ class Scheduler:
             else:
                 self._fail(task_id, FailureReason.VALIDATION_REJECTED, "; ".join(validation.issues))
         except asyncio.CancelledError:
-            # After cancel_task or cancel_run the task is already terminal and this is a no-op.
-            # A paused task was stopped on purpose and must stay paused.
-            if self._states[task_id].status != TaskStatus.PAUSED:
+            # Only a worker task cancelled from outside the scheduler is still in flight here.
+            # After cancel_task or cancel_run the task is terminal; after a pause it is PAUSED,
+            # or already back in the queue if it was resumed while this worker was stopping.
+            if self._states[task_id].status in (TaskStatus.RUNNING, TaskStatus.VALIDATING):
                 self._cancel(task_id, "worker task was cancelled")
             raise
         finally:
@@ -406,21 +407,18 @@ class Scheduler:
             held.append(task_id)
         return held
 
-    def _paused(self, task_ids: Iterable[str]) -> list[str]:
-        return [t for t in task_ids if self._states[t].status == TaskStatus.PAUSED]
-
     async def pause_task(self, task_id: str) -> None:
         """Hold a task. A running worker is stopped; resume continues the same attempt."""
         if task_id not in self._states:
             raise KeyError(task_id)
         self._hold([task_id], "pause_task was called")
         # Also when it was paused already: a repeated pause waits for the same cleanup.
-        await self._stop(self._paused([task_id]))
+        await self._stop([task_id])
 
     async def pause_run(self) -> None:
         """Hold every unfinished task. `run()` keeps waiting until they are resumed."""
         self._run_paused.update(self._hold(tuple(self._states), "pause_run was called"))
-        await self._stop(self._paused(self._states))
+        await self._stop(tuple(self._active))
 
     def _release(self, task_ids: Iterable[str], why: str) -> None:
         for task_id in task_ids:

@@ -651,54 +651,6 @@ async def test_every_failure_except_a_validator_error_is_retried(executor, valid
         )
 
 
-async def test_cancelling_a_task_waiting_for_its_retry_keeps_the_failed_attempt():
-    names = ("f", "g", "h")
-    started = {name: asyncio.Event() for name in names}
-    gates = {name: asyncio.Event() for name in names}
-
-    class Executor:
-        async def execute(self, assignment):
-            name = assignment.task.id
-            started[name].set()
-            await gates[name].wait()
-            return WorkerResult(success=name != "f", message="first try failed")
-
-    validating = asyncio.Event()
-    validator = MockValidator(gate=validating)
-    engine = scheduler(Executor(), validator)
-    engine.register_worker(AgentConfig(id="front", role="frontend"), Executor())
-    running = asyncio.create_task(
-        engine.run(
-            plan(
-                task("f", max_attempts=2),
-                task("g", role="frontend"),
-                # Outranks f's retry, so it takes the only backend worker when f fails.
-                task("h", dependencies=("g",), priority=5),
-            )
-        )
-    )
-    gates["g"].set()
-    await asyncio.wait_for(asyncio.gather(started["f"].wait(), validator.started.wait()), 2)
-    validating.set()
-    gates["f"].set()
-    await asyncio.wait_for(started["h"].wait(), 2)
-    waiting = {s.task.id: s for s in engine.snapshot().tasks}["f"]
-    assert (waiting.status, waiting.attempt_number) == (TaskStatus.READY, 1)
-
-    await engine.cancel_task("f")
-    gates["h"].set()
-    report = await asyncio.wait_for(running, 2)
-
-    assert {s.task.id: s.status for s in report.tasks}["f"] == TaskStatus.CANCELLED
-    (attempt,) = (a for a in report.attempts if a.task_id == "f")
-    assert (attempt.status, attempt.failure_reason, attempt.message) == (
-        TaskStatus.FAILED,
-        FailureReason.WORKER_FAILURE,
-        "first try failed",
-    )
-    assert all(worker.task_id is None for worker in report.workers)
-
-
 async def test_retry_is_logged_without_the_failure_text(caplog):
     caplog.set_level(logging.DEBUG, logger="agentforge")
     await scheduler(FlakyExecutor(message="SECRET-TOKEN")).run(plan(task("a", max_attempts=2)))
@@ -978,7 +930,44 @@ async def test_late_error_from_a_stopped_worker_does_not_fail_a_paused_task():
     assert report.successful and len(report.attempts) == 1
 
 
-async def test_task_paused_while_waiting_for_its_retry_starts_a_new_attempt_on_resume():
+async def test_resume_while_the_paused_worker_is_still_stopping_does_not_cancel_the_task():
+    started, cleaning, release, gate = (asyncio.Event() for _ in range(4))
+    assignments = []
+
+    class SlowToStop:
+        async def execute(self, assignment):
+            assignments.append(assignment)
+            started.set()
+            try:
+                await gate.wait()
+            except asyncio.CancelledError:
+                cleaning.set()
+                await release.wait()  # like waiting for a killed process to exit
+                raise
+            return WorkerResult(success=True)
+
+    engine = scheduler(SlowToStop())
+    running = asyncio.create_task(engine.run(plan(task("a"))))
+    await asyncio.wait_for(started.wait(), 2)
+    pausing = asyncio.create_task(engine.pause_task("a"))
+    await asyncio.wait_for(cleaning.wait(), 2)
+
+    await engine.resume_task("a")
+    gate.set()
+    release.set()
+    await asyncio.wait_for(pausing, 2)
+    report = await asyncio.wait_for(running, 2)
+
+    assert report.tasks[0].status == TaskStatus.COMPLETED, report.tasks[0].message
+    assert [a.resume for a in assignments] == [False, True]
+    assert len(report.attempts) == 1
+
+
+async def run_until_a_waits_for_its_retry():
+    """A run stopped where task a has failed once and waits, READY, for its retry.
+
+    h outranks the retry and holds the only backend worker until its gate opens.
+    """
     executor = GatedExecutor("g")
     fail_once = FlakyExecutor()
 
@@ -996,7 +985,6 @@ async def test_task_paused_while_waiting_for_its_retry_starts_a_new_attempt_on_r
             plan(
                 task("a", max_attempts=2),
                 task("g", role="frontend"),
-                # Outranks the retry of a, so it takes the only backend worker when a fails.
                 task("h", dependencies=("g",), priority=5),
             )
         )
@@ -1007,7 +995,30 @@ async def test_task_paused_while_waiting_for_its_retry_starts_a_new_attempt_on_r
     validating.set()
     executor.gates["a"].set()
     await asyncio.wait_for(executor.started["h"].wait(), 2)
-    assert by_id(engine.snapshot())["a"].status == TaskStatus.READY
+    waiting = by_id(engine.snapshot())["a"]
+    assert (waiting.status, waiting.attempt_number) == (TaskStatus.READY, 1)
+    return engine, running, executor, fail_once
+
+
+async def test_cancelling_a_task_waiting_for_its_retry_keeps_the_failed_attempt():
+    engine, running, executor, _ = await run_until_a_waits_for_its_retry()
+
+    await engine.cancel_task("a")
+    executor.gates["h"].set()
+    report = await asyncio.wait_for(running, 2)
+
+    assert by_id(report)["a"].status == TaskStatus.CANCELLED
+    (attempt,) = (a for a in report.attempts if a.task_id == "a")
+    assert (attempt.status, attempt.failure_reason, attempt.message) == (
+        TaskStatus.FAILED,
+        FailureReason.WORKER_FAILURE,
+        "flaky",
+    )
+    assert all(worker.task_id is None for worker in report.workers)
+
+
+async def test_task_paused_while_waiting_for_its_retry_starts_a_new_attempt_on_resume():
+    engine, running, executor, fail_once = await run_until_a_waits_for_its_retry()
 
     await engine.pause_task("a")
     executor.gates["h"].set()
