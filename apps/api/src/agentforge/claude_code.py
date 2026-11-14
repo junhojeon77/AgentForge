@@ -107,6 +107,13 @@ class ClaudeCodeExecutor:
                 f"Claude Code CLI not found: {self.command[0]!r}. Pass "
                 "command=(<path to claude.exe>,), e.g. the one bundled with the VS Code extension."
             )
+        if program.lower().endswith((".cmd", ".bat")):
+            # Windows runs these through cmd.exe, which cuts the command line at the first line
+            # break: the persona would lose all but its first line, and the session id with it.
+            raise ValueError(
+                f"Claude Code launcher {program!r} is a batch file, which cannot take multi-line "
+                "arguments. Pass command=(<path to claude.exe>,) instead."
+            )
         workspace = task.workspace_reference
         # A single local stat before a long-running process; not worth a thread hop.
         if workspace is None or not pathlib.Path(workspace).is_dir():  # noqa: ASYNC240

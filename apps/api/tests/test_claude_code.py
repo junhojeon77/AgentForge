@@ -260,6 +260,15 @@ async def test_missing_executable_names_the_fix(tmp_path):
         await claude.execute(Assignment(task=task(tmp_path), worker=AgentConfig(id="w", role="b")))
 
 
+async def test_batch_file_launcher_is_rejected(tmp_path):
+    launcher = tmp_path / "claude.cmd"
+    launcher.write_text("@echo off\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    claude = ClaudeCodeExecutor(command=(str(launcher),))
+    with pytest.raises(ValueError, match="claude.exe"):
+        await claude.execute(Assignment(task=task(tmp_path), worker=AgentConfig(id="w", role="b")))
+
+
 @pytest.mark.skipif(
     os.environ.get("AGENTFORGE_LIVE_CLAUDE") != "1",
     reason="live call: set AGENTFORGE_LIVE_CLAUDE=1 and AGENTFORGE_CLAUDE=<claude path>",
