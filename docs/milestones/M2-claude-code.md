@@ -70,7 +70,7 @@ are supported.
 
 | Deferred | Waits for |
 |---|---|
-| Session resume and retries | M4 (retries, pause/resume). Session IDs are already recorded for it; the CLI's `--resume` is not used yet. |
+| Session resume | M4 (pause/resume). Session IDs are already recorded for it; the CLI's `--resume` is not used yet. Retries are done in [M4](M4-orchestration.md): each one starts a new session. |
 | Edit permissions and worktrees | Done in [M3](M3-worktrees.md): a task can allow `"edit"`. Workers still cannot run commands. |
 | A per-task timeout | Later runtime work. For now `cancel_task` stops a stuck worker. |
 | A Claude Code mode for `python -m agentforge` | When wanted; the demo stays mock-only. |

@@ -17,7 +17,7 @@ No new dependency was added; Git and `asyncio` subprocesses do the work. The sch
 
 | Item | Behavior |
 |---|---|
-| `WorktreeExecutor(inner, root)` | Wraps any `WorkerExecutor`. Creates a worktree at `root/<run_id>/<task_id>` from `TaskSpec.repository_reference` at `TaskSpec.base_commit` (empty means `HEAD`), runs `inner` with `workspace_reference` set to it, then sets `workspace` and `diff` on the result |
+| `WorktreeExecutor(inner, root)` | Wraps any `WorkerExecutor`. Creates a worktree at `root/<run_id>/<task_id>/<attempt>` (the attempt folder was added in [M4](M4-orchestration.md)) from `TaskSpec.repository_reference` at `TaskSpec.base_commit` (empty means `HEAD`), runs `inner` with `workspace_reference` set to it, then sets `workspace` and `diff` on the result |
 | `worktrees.create(repo, base_commit, path)` | `git worktree add --detach`; `path` must be absolute. The commit is resolved first, so an unknown commit or a value starting with `-` is rejected |
 | `worktrees.diff(path)` | `git add -A`, then `git diff --cached --no-ext-diff --no-textconv HEAD`: every change since the base commit, new files included, ignored files excluded |
 | `worktrees.remove(repo, path)` | `git worktree remove --force`: deletes the worktree and its uncommitted changes |
@@ -30,8 +30,8 @@ Outcome mapping:
 - Run and task ids may use only `A-Z a-z 0-9 - _`, so a worktree can never land outside `root`.
   Anything else, a missing `repository_reference`, or any Git failure raises →
   `EXECUTOR_EXCEPTION`.
-- A worktree path that already exists (the same run and task id again) is a Git failure. Nothing
-  is overwritten.
+- A worktree path that already exists (the same run id, task id and attempt number again) is a
+  Git failure. Nothing is overwritten.
 - A check that exits non-zero, times out, or is not in `checks` → the task is rejected
   (`VALIDATION_REJECTED`) with the check's name and the last 2,000 characters of its output.
 - No workspace folder → rejected. A check program that cannot be started → `VALIDATOR_EXCEPTION`.
@@ -61,7 +61,7 @@ Outcome mapping:
 | Deferred | Waits for |
 |---|---|
 | Workers running commands (tests, builds) themselves | A sandbox decision. Until then only the validator runs commands |
-| Retrying a task whose check failed | M4 (retries) |
+| Retrying a task whose check failed | Done in [M4](M4-orchestration.md): set `TaskSpec.max_attempts` |
 | Removing worktrees automatically; merging them back | M4 (recovery) and M7 (integration) |
 | Checking natural-language acceptance criteria | Later; the validator runs commands only |
 | Using `AgentConfig.permissions` | Still descriptive. Edit rights are per task, in `allowed_operations` |

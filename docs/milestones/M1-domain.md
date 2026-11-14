@@ -74,8 +74,9 @@ test commands are inspected or executed. A worker's success flag alone never com
 
 Failures distinguish worker-reported failure, executor exception, invalid worker result, validation
 rejection, and validator exception. Failed/cancelled tasks recursively block descendants; `blocked_by`
-records the originating task. The first blocking origin wins. Independent branches continue. Each
-task has at most one attempt per run; no automatic or manual retry is exposed.
+records the originating task. The first blocking origin wins. Independent branches continue. In
+M1 each task had one attempt per run. Since M4 a task can set `max_attempts`; with the default of
+1 the behavior here is unchanged. See [M4](M4-orchestration.md).
 
 ## Cancellation and lifecycle limits
 
@@ -93,9 +94,10 @@ keep cancellation waiting; forced process termination and timeouts are future ru
 all scheduler methods from the same event loop, not arbitrary threads. Worker reservations are
 released on every completed cleanup path, including cancellation before a coroutine starts.
 
-`PAUSED` is reserved in the enum. Pause/resume, retries, reactivation of blocked tasks, durable
-checkpoints, and restart recovery belong to M4. Duplicate prevention applies within a live run;
-reusing a plan in a later run executes it again. There are no restart or exactly-once guarantees.
+`PAUSED` is reserved in the enum. Retries were added in [M4](M4-orchestration.md). Pause/resume,
+reactivation of blocked tasks, durable checkpoints, and restart recovery are still planned for M4.
+Duplicate prevention applies within a live run; reusing a plan in a later run executes it again.
+There are no restart or exactly-once guarantees.
 
 ## Acceptance checks
 

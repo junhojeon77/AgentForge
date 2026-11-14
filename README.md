@@ -3,8 +3,8 @@
 A local-first Windows platform where one lead agent coordinates specialized coding agents. It ships
 with five, and you can add, remove or fully customize any of them.
 
-**Status:** M1–M3 are implemented as a Python library. The desktop app, REST API, persistence and
-the lead agent are planned, not built.
+**Status:** M1–M3 and task retries (the first part of M4) are implemented as a Python library. The
+desktop app, REST API, persistence and the lead agent are planned, not built.
 
 ## What is AgentForge
 
@@ -61,6 +61,8 @@ flowchart LR
   free worker. `max_concurrency` is 1–5 (default 5).
 - **Failure stays local.** A failed or cancelled task blocks only the tasks that depend on it.
   Independent branches keep running.
+- **Retries start clean.** A task can allow up to five attempts. Each retry gets a fresh worktree
+  and session and is told why the last attempt failed.
 - **Clean cancellation.** Cancelling a task or a run stops its work and waits for cleanup. For
   Claude Code this kills the CLI process.
 - **Restricted Claude Code worker.** Each task gets one `claude -p` process limited to the Read,
@@ -151,7 +153,7 @@ asyncio.run(main())
 ```
 
 Each run is billed to your Claude Code login. Several M2 features are deliberately deferred, such
-as resume/retries (M4) and a per-task timeout. They are listed under "Not implemented yet" in
+as session resume (M4) and a per-task timeout. They are listed under "Not implemented yet" in
 [the M2 doc](docs/milestones/M2-claude-code.md).
 
 ### 4. Let a worker edit code in a worktree
@@ -172,7 +174,7 @@ from agentforge.worktrees import WorktreeExecutor
                     allowed_operations=("edit",), execution_constraints=("check:unit",))
 ```
 
-The worker edits `C:\path\to\worktrees\r1\t1`, not your checkout. Afterwards
+The worker edits `C:\path\to\worktrees\r1\t1\1` (run, task, attempt), not your checkout. Afterwards
 `report.attempts[0].result.diff` holds the change, and the task completes only if pytest exits 0
 there. The worktree is kept; delete it with `agentforge.worktrees.remove(repo, path)`.
 
@@ -180,7 +182,31 @@ Two things to know first. Checks run code the worker wrote, with your user right
 is not a sandbox. And edit mode has not been tried against the live CLI yet. Both are detailed
 in [the M3 doc](docs/milestones/M3-worktrees.md).
 
-### 5. Verify
+### 5. Retry a failed task
+
+Add `max_attempts` (1–5, default 1) to the task:
+
+```python
+    task = TaskSpec(..., execution_constraints=("check:unit",), max_attempts=3)
+```
+
+If pytest fails, the task runs again in a new worktree (`...\r1\t1\2`) with a new Claude session,
+and the worker is told the check output. The task fails only when all three attempts have failed.
+Every attempt is billed. `report.attempts` lists each one with its diff and failure message, and
+`report.transitions` says why each retry happened or did not.
+
+To follow a run as it happens, turn on logging before you start it:
+
+```python
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+```
+
+Logs never contain prompts, diffs or check output. What each line means, and where to look when a
+run goes wrong, is in [the M4 doc](docs/milestones/M4-orchestration.md#how-to-debug-a-run).
+
+### 6. Verify
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest apps/api/tests
@@ -237,3 +263,5 @@ app (M6), which will call these same functions.
   outcome mapping, the live check and deferred work.
 - [M3: worktrees and validation](docs/milestones/M3-worktrees.md): worktrees, edit mode, diffs,
   check commands, risks and deferred work.
+- [M4: retries](docs/milestones/M4-orchestration.md): retry rules, how to debug a run, limits and
+  the M4 parts still planned.

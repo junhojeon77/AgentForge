@@ -79,7 +79,9 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   descriptive. `AgentConfig.persona` (≤10,000 chars, the cap keeps the CLI argument under the
   Windows command-line limit) is sent as `--append-system-prompt`. `WorkerResult.session_id`,
   `workspace` and `diff` are set by executors, never by the model. `TaskSpec.allowed_operations`
-  containing `"edit"` is what lets a Claude Code worker edit files.
+  containing `"edit"` is what lets a Claude Code worker edit files. `TaskSpec.max_attempts`
+  (1–5, default 1) allows retries; `Assignment.previous_failure`, `TaskState.attempt_number`,
+  `TaskAttempt.message` and `Transition.detail` record them.
 - **`orchestration.py`: `Scheduler`.** Two `Protocol` seams are where workers and validators plug
   in: `WorkerExecutor.execute(Assignment) -> WorkerResult` (mock or Claude Code) and
   `ResultValidator.validate(TaskSpec, WorkerResult) -> ValidationReport` (mock or
@@ -92,9 +94,16 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
     by `(-priority, id)`, reserves the lowest-ID idle worker of the matching role, and spawns one
     asyncio task per assignment, up to `max_concurrency` (1–5).
   - `_execute()` runs RUNNING → executor → result validation → VALIDATING → validator →
-    COMPLETED/FAILED. Its `finally` fails any still-unfinished task (a `BaseException` that
-    bypassed the handlers), releases the worker, drops the active task and sets `_wake`. The
-    worker stays reserved through validation.
+    COMPLETED/FAILED. Its `finally` fails a task that is still RUNNING or VALIDATING (a
+    `BaseException` that bypassed the handlers), releases the worker, drops the active task and
+    sets `_wake`. The worker stays reserved through validation.
+  - `_fail()` decides retries. With attempts left, and unless the reason is
+    `VALIDATOR_EXCEPTION`, it marks the attempt FAILED and puts the task back to READY, never
+    FAILED, because FAILED is terminal and would block descendants. Otherwise the task fails.
+    Attempts are keyed by `(task_id, number)`; `_transition()` leaves an already-finished attempt
+    alone, so cancelling a task that waits for its retry keeps the failed attempt's record.
+  - Logging: `_record()` logs every transition at DEBUG and `_fail()` logs the retry decision at
+    WARNING. No module logs a prompt, persona, diff, check output or failure message.
   - Atomicity relies on a single event loop and on making no `await` inside a state mutation.
     `_transition()` refuses to leave a terminal state, so the first terminal outcome wins: late
     success can't overwrite cancellation.
@@ -122,7 +131,8 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   on stdin, a fresh `--session-id`, `--effort`/`--model` from `AgentConfig`, the persona as
   `--append-system-prompt`, the `WorkerResult` schema via `--json-schema`, and a
   `--max-budget-usd` cap. Every event goes to `on_event`; the final `result.structured_output`
-  becomes the `WorkerResult`. An error result → `WORKER_FAILURE`, no result →
+  becomes the `WorkerResult`. On a retry the prompt also carries `previous_failure`, labelled as
+  data, not instructions. An error result → `WORKER_FAILURE`, no result →
   `EXECUTOR_EXCEPTION`, and cancellation kills the process. The CLI is usually not on PATH: pass
   `command=(<path to the VS Code extension's claude.exe>,)`.
 - **`worktrees.py`: one checkout per task.** `create`, `diff` and `remove` are thin async
@@ -130,9 +140,9 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   `worktree add --detach`, so a commit string can't act as a flag, and requires an absolute
   path. `diff` stages everything in the worktree's own index and diffs it against `HEAD` with
   external diff programs off, because worktree content is untrusted. `WorktreeExecutor(inner,
-  root)` wraps another executor: it creates `root/<run_id>/<task_id>` (ids limited to
-  `[A-Za-z0-9_-]+`), runs `inner` there and adds `workspace` and `diff` to the result. Worktrees
-  are kept, never reused, and not sandboxes.
+  root)` wraps another executor: it creates `root/<run_id>/<task_id>/<attempt>` (ids limited to
+  `[A-Za-z0-9_-]+`), runs `inner` there and adds `workspace` and `diff` to the result. Each retry
+  gets a new worktree. Worktrees are kept, never reused, and not sandboxes.
 - **`validation.py`: `CommandValidator`.** Runs each `check:<name>` constraint as a configured
   argv (no shell) in the result's workspace with a timeout. It rejects on a non-zero exit, a
   timeout or an unknown check, and never reads the worker's `passed_checks`. Timeout and
@@ -151,15 +161,17 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
 
 Tests are in `apps/api/tests/`:
 - `test_contracts.py`: contract validation and immutability.
-- `test_scheduler.py`: dispatch, failure, cancellation, race behavior and a demo smoke test.
+- `test_scheduler.py`: dispatch, failure, retries, cancellation, race behavior, log lines and a
+  demo smoke test.
 - `test_personas.py`: the persona folder.
 - `test_claude_code.py`: the Claude Code executor. It uses `fake_claude.py`, which replays
   `fixtures/claude_stream.jsonl` (a trimmed live recording). Its live test is opt-in.
-- `test_worktrees.py`: worktrees and diffs in disposable Git repositories, plus a full
-  edit → diff → check run with the fake Claude.
+- `test_worktrees.py`: worktrees and diffs in disposable Git repositories, plus full
+  edit → diff → check runs with the fake Claude, one of them retried after a failing check.
 - `test_validation.py`: the command validator. Its `hanging` fixture is a check that reports
   its pid over a local socket, a barrier for the timeout and cancellation tests.
 
 Delivered contracts and limits are in [M1-domain.md](docs/milestones/M1-domain.md),
-[M2-claude-code.md](docs/milestones/M2-claude-code.md) and
-[M3-worktrees.md](docs/milestones/M3-worktrees.md).
+[M2-claude-code.md](docs/milestones/M2-claude-code.md),
+[M3-worktrees.md](docs/milestones/M3-worktrees.md) and
+[M4-orchestration.md](docs/milestones/M4-orchestration.md).
