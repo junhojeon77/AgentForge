@@ -58,3 +58,12 @@ def test_agent_persona_is_optional_and_capped():
 def test_worker_result_session_id_is_optional():
     assert WorkerResult(success=True).session_id is None
     assert WorkerResult(success=True, session_id="s").session_id == "s"
+
+
+def test_max_attempts_defaults_to_one_and_is_bounded():
+    values = {"id": "a", "run_id": "run", "title": "A", "role": "backend"}
+    assert TaskSpec(**values).max_attempts == 1
+    assert TaskSpec(**values, max_attempts=5).max_attempts == 5
+    for bad in (0, 6, True, "2"):
+        with pytest.raises(ValidationError):
+            TaskSpec(**values, max_attempts=bad)

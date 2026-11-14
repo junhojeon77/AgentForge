@@ -65,6 +65,8 @@ class TaskSpec(Contract):
     allowed_operations: tuple[str, ...] = ()
     execution_constraints: tuple[str, ...] = ()
     expected_output: tuple[str, ...] = ()
+    # Capped because every attempt of a Claude Code task is billed.
+    max_attempts: int = Field(1, ge=1, le=5, strict=True)
 
 
 class RunPlan(Contract):
@@ -93,6 +95,7 @@ class Assignment(Contract):
     task: TaskSpec
     worker: AgentConfig
     attempt_number: int = 1
+    previous_failure: str = ""  # why the last attempt failed; empty on the first
 
 
 class TaskState(Contract):
@@ -102,6 +105,7 @@ class TaskState(Contract):
     failure_reason: FailureReason | None = None
     message: str = ""
     blocked_by: str | None = None
+    attempt_number: int = 0  # the latest attempt started; 0 before the first
 
 
 class WorkerState(Contract):
@@ -117,12 +121,14 @@ class TaskAttempt(Contract):
     result: WorkerResult | None = None
     validation: ValidationReport | None = None
     failure_reason: FailureReason | None = None
+    message: str = ""
 
 
 class Transition(Contract):
     sequence: int
     task_id: str
     status: TaskStatus
+    detail: str = ""  # why, when the status alone does not say: the retry decision
 
 
 class RunReport(Contract):

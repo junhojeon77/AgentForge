@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import pytest
 from pydantic import ValidationError
@@ -495,3 +496,168 @@ async def test_demo_completes_all_five_tasks(capsys):
     assert banner == "All five mock workers are executing concurrently."
     report = RunReport.model_validate_json(report)
     assert report.successful and len(report.tasks) == 5
+
+
+class FlakyExecutor:
+    """Fails task "a" on its first `failures` attempts; everything else succeeds."""
+
+    def __init__(self, failures=1, message="flaky"):
+        self.failures = failures
+        self.message = message
+        self.assignments = []
+
+    async def execute(self, assignment):
+        self.assignments.append(assignment)
+        passed = assignment.task.id != "a" or assignment.attempt_number > self.failures
+        return WorkerResult(success=passed, message=self.message)
+
+
+async def test_failed_attempt_is_retried_with_the_failure_as_feedback():
+    executor = FlakyExecutor()
+    report = await scheduler(executor).run(
+        plan(task("a", max_attempts=2), task("b", dependencies=("a",)))
+    )
+    assert report.successful
+    first, second, _ = report.attempts
+    assert (first.number, first.status, first.failure_reason, first.message) == (
+        1,
+        TaskStatus.FAILED,
+        FailureReason.WORKER_FAILURE,
+        "flaky",
+    )
+    assert (second.number, second.status, second.failure_reason) == (2, TaskStatus.COMPLETED, None)
+    assert [(a.task.id, a.attempt_number, a.previous_failure) for a in executor.assignments] == [
+        ("a", 1, ""),
+        ("a", 2, "flaky"),
+        ("b", 1, ""),
+    ]
+    state = report.tasks[0]
+    assert (state.attempt_number, state.failure_reason, state.message) == (2, None, "")
+    assert [t.status for t in report.transitions if t.task_id == "a"] == [
+        TaskStatus.PENDING,
+        TaskStatus.READY,
+        TaskStatus.ASSIGNED,
+        TaskStatus.RUNNING,
+        TaskStatus.READY,
+        TaskStatus.ASSIGNED,
+        TaskStatus.RUNNING,
+        TaskStatus.VALIDATING,
+        TaskStatus.COMPLETED,
+    ]
+    assert all(worker.task_id is None for worker in report.workers)
+
+
+async def test_task_fails_and_blocks_descendants_when_attempts_run_out():
+    report = await scheduler(FlakyExecutor(failures=5)).run(
+        plan(task("a", max_attempts=3), task("b", dependencies=("a",)))
+    )
+    states = {t.task.id: t for t in report.tasks}
+    assert states["a"].status == TaskStatus.FAILED
+    assert states["a"].failure_reason == FailureReason.WORKER_FAILURE
+    assert (states["a"].attempt_number, states["a"].message) == (3, "flaky")
+    assert states["b"].status == TaskStatus.BLOCKED
+    assert [(a.number, a.status) for a in report.attempts] == [
+        (number, TaskStatus.FAILED) for number in (1, 2, 3)
+    ]
+    assert [t.detail for t in report.transitions if t.detail] == [
+        "attempt 1 of 3 failed (worker_failure); retrying",
+        "attempt 2 of 3 failed (worker_failure); retrying",
+        "attempt 3 of 3 failed (worker_failure); no attempts left",
+    ]
+
+
+@pytest.mark.parametrize(
+    "executor,validator,reason,runs",
+    [
+        (
+            MockExecutor(result=WorkerResult(success=False)),
+            MockValidator(),
+            FailureReason.WORKER_FAILURE,
+            2,
+        ),
+        (
+            MockExecutor(error=RuntimeError("boom")),
+            MockValidator(),
+            FailureReason.EXECUTOR_EXCEPTION,
+            2,
+        ),
+        (MockExecutor(result={"invalid": True}), MockValidator(), FailureReason.INVALID_RESULT, 2),
+        (MockExecutor(), MockValidator(reject=True), FailureReason.VALIDATION_REJECTED, 2),
+        (
+            MockExecutor(),
+            MockValidator(error=RuntimeError("invalid")),
+            FailureReason.VALIDATOR_EXCEPTION,
+            1,
+        ),
+    ],
+)
+async def test_every_failure_except_a_validator_error_is_retried(executor, validator, reason, runs):
+    report = await scheduler(executor, validator).run(plan(task("a", max_attempts=2)))
+    assert report.tasks[0].status == TaskStatus.FAILED
+    assert report.tasks[0].failure_reason == reason
+    assert len(executor.assignments) == len(report.attempts) == runs
+    assert all(a.failure_reason == reason for a in report.attempts)
+    if runs == 1:
+        assert report.transitions[-1].detail == (
+            "attempt 1 of 2 failed (validator_exception); "
+            "not retried: validator errors are setup problems"
+        )
+
+
+async def test_cancelling_a_task_waiting_for_its_retry_keeps_the_failed_attempt():
+    names = ("f", "g", "h")
+    started = {name: asyncio.Event() for name in names}
+    gates = {name: asyncio.Event() for name in names}
+
+    class Executor:
+        async def execute(self, assignment):
+            name = assignment.task.id
+            started[name].set()
+            await gates[name].wait()
+            return WorkerResult(success=name != "f", message="first try failed")
+
+    validating = asyncio.Event()
+    validator = MockValidator(gate=validating)
+    engine = scheduler(Executor(), validator)
+    engine.register_worker(AgentConfig(id="front", role="frontend"), Executor())
+    running = asyncio.create_task(
+        engine.run(
+            plan(
+                task("f", max_attempts=2),
+                task("g", role="frontend"),
+                # Outranks f's retry, so it takes the only backend worker when f fails.
+                task("h", dependencies=("g",), priority=5),
+            )
+        )
+    )
+    gates["g"].set()
+    await asyncio.wait_for(asyncio.gather(started["f"].wait(), validator.started.wait()), 2)
+    validating.set()
+    gates["f"].set()
+    await asyncio.wait_for(started["h"].wait(), 2)
+    waiting = {s.task.id: s for s in engine.snapshot().tasks}["f"]
+    assert (waiting.status, waiting.attempt_number) == (TaskStatus.READY, 1)
+
+    await engine.cancel_task("f")
+    gates["h"].set()
+    report = await asyncio.wait_for(running, 2)
+
+    assert {s.task.id: s.status for s in report.tasks}["f"] == TaskStatus.CANCELLED
+    (attempt,) = (a for a in report.attempts if a.task_id == "f")
+    assert (attempt.status, attempt.failure_reason, attempt.message) == (
+        TaskStatus.FAILED,
+        FailureReason.WORKER_FAILURE,
+        "first try failed",
+    )
+    assert all(worker.task_id is None for worker in report.workers)
+
+
+async def test_retry_is_logged_without_the_failure_text(caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    await scheduler(FlakyExecutor(message="SECRET-TOKEN")).run(plan(task("a", max_attempts=2)))
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == ["run run task a: attempt 1 of 2 failed (worker_failure); retrying"]
+    debug = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+    assert "run run task a: RUNNING (attempt 2, worker worker)" in debug
+    assert "run run task a: COMPLETED (attempt 2, worker worker)" in debug
+    assert "SECRET-TOKEN" not in caplog.text

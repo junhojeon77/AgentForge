@@ -1,6 +1,7 @@
 """Single-event-loop scheduler with atomic, non-awaiting state transitions."""
 
 import asyncio
+import logging
 from typing import Protocol
 
 from pydantic import ValidationError
@@ -21,6 +22,8 @@ from agentforge.domain import (
     WorkerResult,
     WorkerState,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerExecutor(Protocol):
@@ -48,7 +51,8 @@ class Scheduler:
         self._executors: dict[str, WorkerExecutor] = {}
         self._states: dict[str, TaskState] = {}
         self._dependents: dict[str, list[str]] = {}
-        self._attempts: dict[str, TaskAttempt] = {}
+        # Keyed by (task id, attempt number); insertion order is dispatch order.
+        self._attempts: dict[tuple[str, int], TaskAttempt] = {}
         self._transitions: list[Transition] = []
         self._active: dict[str, asyncio.Task[None]] = {}
         self._running = False
@@ -131,21 +135,35 @@ class Scheduler:
         finally:
             self._running = False
 
-    def _record(self, task_id: str, status: TaskStatus) -> None:
+    def _record(self, task_id: str, status: TaskStatus, detail: str = "") -> None:
         self._transitions.append(
-            Transition(sequence=len(self._transitions) + 1, task_id=task_id, status=status)
+            Transition(
+                sequence=len(self._transitions) + 1, task_id=task_id, status=status, detail=detail
+            )
         )
+        state = self._states[task_id]
+        logger.debug(
+            "run %s task %s: %s (attempt %d, worker %s)",
+            self._run_id, task_id, status, state.attempt_number, state.worker_id,
+        )  # fmt: skip
 
-    def _transition(self, task_id: str, status: TaskStatus, **changes) -> bool:
+    def _transition(self, task_id: str, status: TaskStatus, *, detail: str = "", **changes) -> bool:
         state = self._states[task_id]
         if state.status in TERMINAL:
             return False
-        self._states[task_id] = state.model_copy(update={"status": status, **changes})
-        if task_id in self._attempts:
-            self._attempts[task_id] = self._attempts[task_id].model_copy(
-                update={"status": status, "failure_reason": changes.get("failure_reason")}
+        state = state.model_copy(update={"status": status, **changes})
+        self._states[task_id] = state
+        key = (task_id, state.attempt_number)
+        # A failed attempt keeps its record when the task is cancelled while awaiting its retry.
+        if key in self._attempts and self._attempts[key].status not in TERMINAL:
+            self._attempts[key] = self._attempts[key].model_copy(
+                update={
+                    "status": status,
+                    "failure_reason": changes.get("failure_reason"),
+                    "message": changes.get("message", ""),
+                }
             )
-        self._record(task_id, status)
+        self._record(task_id, status, detail)
         return True
 
     def _dispatch(self) -> None:
@@ -174,16 +192,28 @@ class Scheduler:
                 continue
             worker = workers[0]
             task_id = state.task.id
+            number = state.attempt_number + 1
+            previous_failure = self._attempts[task_id, number - 1].message if number > 1 else ""
             self._workers[worker.agent.id] = worker.model_copy(update={"task_id": task_id})
-            self._attempts[task_id] = TaskAttempt(task_id=task_id, worker_id=worker.agent.id)
-            self._transition(task_id, TaskStatus.ASSIGNED, worker_id=worker.agent.id)
-            assignment = Assignment(task=state.task, worker=worker.agent)
+            self._attempts[task_id, number] = TaskAttempt(
+                task_id=task_id, worker_id=worker.agent.id, number=number
+            )
+            self._transition(
+                task_id, TaskStatus.ASSIGNED, worker_id=worker.agent.id, attempt_number=number
+            )
+            assignment = Assignment(
+                task=state.task,
+                worker=worker.agent,
+                attempt_number=number,
+                previous_failure=previous_failure,
+            )
             self._active[task_id] = asyncio.create_task(
                 self._execute(assignment), name=f"agentforge:{self._run_id}:{task_id}"
             )
 
     async def _execute(self, assignment: Assignment) -> None:
         task_id, worker_id = assignment.task.id, assignment.worker.id
+        attempt = (task_id, assignment.attempt_number)
         try:
             if not self._transition(task_id, TaskStatus.RUNNING):
                 return
@@ -199,7 +229,7 @@ class Scheduler:
             except (ValidationError, TypeError, ValueError):
                 self._fail(task_id, FailureReason.INVALID_RESULT, "invalid worker result")
                 return
-            self._attempts[task_id] = self._attempts[task_id].model_copy(update={"result": result})
+            self._attempts[attempt] = self._attempts[attempt].model_copy(update={"result": result})
             if not result.success:
                 self._fail(task_id, FailureReason.WORKER_FAILURE, result.message)
                 return
@@ -212,7 +242,7 @@ class Scheduler:
                 return
             if self._states[task_id].status in TERMINAL:
                 return
-            self._attempts[task_id] = self._attempts[task_id].model_copy(
+            self._attempts[attempt] = self._attempts[attempt].model_copy(
                 update={"validation": validation}
             )
             if validation.accepted:
@@ -224,20 +254,48 @@ class Scheduler:
                 self._block_descendants(task_id)
             raise
         finally:
-            # No-op after a terminal outcome; catches BaseExceptions that bypass the handlers.
-            validating = self._states[task_id].status == TaskStatus.VALIDATING
-            reason = (
-                FailureReason.VALIDATOR_EXCEPTION
-                if validating
-                else FailureReason.EXECUTOR_EXCEPTION
-            )
-            self._fail(task_id, reason, "worker stopped unexpectedly")
+            # Still mid-flight here means a BaseException bypassed the handlers above. A task
+            # already requeued for a retry is READY and must be left alone.
+            status = self._states[task_id].status
+            if status in (TaskStatus.RUNNING, TaskStatus.VALIDATING):
+                reason = (
+                    FailureReason.VALIDATOR_EXCEPTION
+                    if status == TaskStatus.VALIDATING
+                    else FailureReason.EXECUTOR_EXCEPTION
+                )
+                self._fail(task_id, reason, "worker stopped unexpectedly")
             self._workers[worker_id] = self._workers[worker_id].model_copy(update={"task_id": None})
             self._active.pop(task_id, None)
             self._wake.set()
 
     def _fail(self, task_id: str, reason: FailureReason, message: str) -> None:
-        if self._transition(task_id, TaskStatus.FAILED, failure_reason=reason, message=message):
+        state = self._states[task_id]
+        if state.status in TERMINAL:
+            return
+        number, limit = state.attempt_number, state.task.max_attempts
+        # A validator that cannot run is a setup problem; a rerun would bill the worker again.
+        retry = number < limit and reason != FailureReason.VALIDATOR_EXCEPTION
+        if retry:
+            outcome = "retrying"
+        elif number < limit:
+            outcome = "not retried: validator errors are setup problems"
+        else:
+            outcome = "no attempts left"
+        detail = f"attempt {number} of {limit} failed ({reason}); {outcome}"
+        # The reason only: the message can hold check output, which stays in the report.
+        logger.warning("run %s task %s: %s", self._run_id, task_id, detail)
+        if retry:
+            self._attempts[task_id, number] = self._attempts[task_id, number].model_copy(
+                update={"status": TaskStatus.FAILED, "failure_reason": reason, "message": message}
+            )
+            # READY, not FAILED: FAILED is terminal and would block the task's descendants.
+            self._states[task_id] = state.model_copy(
+                update={"status": TaskStatus.READY, "worker_id": None}
+            )
+            self._record(task_id, TaskStatus.READY, detail)
+        elif self._transition(
+            task_id, TaskStatus.FAILED, detail=detail, failure_reason=reason, message=message
+        ):
             self._block_descendants(task_id)
 
     def _block_descendants(self, origin: str) -> None:
