@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from agentforge.domain import AgentConfig, TaskSpec, WorkerResult
+from agentforge.domain import AgentConfig, RunPlan, TaskSpec, WorkerResult
 
 
 def test_task_spec_preserves_contract_and_is_immutable():
@@ -33,6 +33,30 @@ def test_task_spec_preserves_contract_and_is_immutable():
 def test_invalid_task_contract(values):
     with pytest.raises(ValidationError):
         TaskSpec(**({"id": "a", "run_id": "run", "title": "A", "role": "backend"} | values))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["a\nb", "a\n", "a\rb", "a\tb", "a\x00", "\x1b[31mred", "a\x7f", "a\x85b", "a b", "a "],
+)
+def test_ids_titles_and_roles_reject_control_characters(bad):
+    values = {"id": "a", "run_id": "run", "title": "A", "role": "backend"}
+    for field in values:
+        with pytest.raises(ValidationError):
+            TaskSpec(**(values | {field: bad}))
+    with pytest.raises(ValidationError):
+        TaskSpec(**values, dependencies=(bad,))
+    with pytest.raises(ValidationError):
+        AgentConfig(id=bad, role="backend")
+    with pytest.raises(ValidationError):
+        AgentConfig(id="a", role=bad)
+    with pytest.raises(ValidationError):
+        RunPlan(id=bad)
+
+
+@pytest.mark.parametrize("good", ["my task", "작업-1", "naïve_id", " padded "])
+def test_ids_still_accept_spaces_and_other_languages(good):
+    assert TaskSpec(id=good, run_id="run", title=good, role="backend").id == good
 
 
 def test_agent_roles_are_extensible():

@@ -62,7 +62,8 @@ def test_load_accepts_files_saved_with_a_utf8_bom(tmp_path):
         AgentConfig(id="Backend", role="backend"),  # Windows file names ignore case
         AgentConfig(id="a", role=" backend"),  # would not survive a reload unchanged
         AgentConfig(id="a", role="backend", model="m\nreasoning: max"),
-        AgentConfig(id="a", role="back\nend"),
+        # The contract refuses this role itself, so build it unchecked: save must still refuse.
+        AgentConfig.model_construct(id="a", role="back\nend"),
     ],
 )
 def test_save_rejects_unsafe_ids_and_multiline_values(tmp_path, agent):

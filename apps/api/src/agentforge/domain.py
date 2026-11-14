@@ -5,7 +5,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
-Identifier = Annotated[str, Field(min_length=1, pattern=r"\S")]
+# Ids, roles and titles are printed in logs and transition reasons, so a control character or
+# line separator in one could forge a log line. At least one character must not be a space.
+_UNSAFE = r"\x00-\x1f\x7f-\x9f  "
+Identifier = Annotated[
+    str, Field(min_length=1, pattern=rf"^[^{_UNSAFE}]*[^\s{_UNSAFE}][^{_UNSAFE}]*$")
+]
 
 
 class Contract(BaseModel):
