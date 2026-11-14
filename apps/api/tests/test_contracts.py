@@ -90,6 +90,28 @@ def test_worker_result_session_id_is_optional():
 
 
 def test_timeout_is_optional_and_must_be_a_positive_number():
+    values = {"id": "a", "run_id": "run", "title": "A", "role": "backend"}
+    assert TaskSpec(**values).timeout_seconds is None
+    assert TaskSpec(**values, timeout_seconds=0.5).timeout_seconds == 0.5
+    assert TaskSpec(**values, timeout_seconds=30).timeout_seconds == 30
+    for bad in (0, -1, "30", True, float("inf"), float("nan")):
+        with pytest.raises(ValidationError):
+            TaskSpec(**values, timeout_seconds=bad)
+
+
+@pytest.mark.parametrize(
+    "model", ["opus", "claude-sonnet-5-5", "claude-opus-5-5[1m]", "us.anthropic.claude-opus-5-5"]
+)
+def test_agent_model_accepts_model_ids_and_aliases(model):
+    assert AgentConfig(id="a", role="backend", model=model).model == model
+
+
+@pytest.mark.parametrize("model", ["", " opus", "opus ", "claude opus", "m\nreasoning: max", "-p"])
+def test_agent_model_rejects_spaces_line_breaks_and_flags(model):
+    with pytest.raises(ValidationError):
+        AgentConfig(id="a", role="backend", model=model)
+
+
 def test_max_attempts_defaults_to_one_and_is_bounded():
     values = {"id": "a", "run_id": "run", "title": "A", "role": "backend"}
     assert TaskSpec(**values).max_attempts == 1

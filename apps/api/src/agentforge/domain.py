@@ -48,7 +48,9 @@ class FailureReason(StrEnum):
 class AgentConfig(Contract):
     id: Identifier
     role: Identifier
-    model: str | None = None  # None: the runtime's default model
+    # None: the runtime's default model. Model ids and aliases only, so a typo in a persona file
+    # fails when the file is loaded, and a value can never be read as a CLI flag.
+    model: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$")] | None = None
     reasoning: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     # Sent as a CLI argument; the cap keeps it far below Windows' 32,767-character command line.
     persona: str = Field("", max_length=10_000)

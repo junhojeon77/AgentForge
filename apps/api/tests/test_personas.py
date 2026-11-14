@@ -61,8 +61,8 @@ def test_load_accepts_files_saved_with_a_utf8_bom(tmp_path):
         AgentConfig(id="../x", role="backend"),
         AgentConfig(id="Backend", role="backend"),  # Windows file names ignore case
         AgentConfig(id="a", role=" backend"),  # would not survive a reload unchanged
-        AgentConfig(id="a", role="backend", model="m\nreasoning: max"),
-        # The contract refuses this role itself, so build it unchecked: save must still refuse.
+        # The contract refuses these values itself, so build them unchecked: save must still refuse.
+        AgentConfig.model_construct(id="a", role="backend", model="m\nreasoning: max"),
         AgentConfig.model_construct(id="a", role="back\nend"),
     ],
 )
@@ -85,6 +85,7 @@ def test_remove_rejects_unsafe_ids(tmp_path):
         ("nofront.md", "Just text."),
         ("dup.md", "---\nid: dup\nid: dup\nrole: backend\n---\nHi."),
         ("Up.md", "---\nid: Up\nrole: backend\n---\nHi."),  # loadable but never saveable
+        ("flag.md", "---\nid: flag\nrole: backend\nmodel: -p\n---\nHi."),
     ],
 )
 def test_load_names_the_invalid_file(tmp_path, name, text):
