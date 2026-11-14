@@ -651,6 +651,44 @@ async def test_every_failure_except_a_validator_error_is_retried(executor, valid
         )
 
 
+async def test_worker_past_its_timeout_is_stopped_and_fails(caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    executor = GatedExecutor()  # its gate never opens: only the timeout ends the attempt
+    engine = scheduler(executor)
+
+    report = await asyncio.wait_for(
+        engine.run(plan(task("a", timeout_seconds=0.01), task("b", dependencies=("a",)))), 2
+    )
+
+    states, (attempt,) = by_id(report), report.attempts
+    assert states["a"].status == TaskStatus.FAILED
+    assert states["a"].failure_reason == attempt.failure_reason == FailureReason.WORKER_TIMEOUT
+    assert states["a"].message == attempt.message == "worker timed out after 0.01s"
+    assert states["b"].status == TaskStatus.BLOCKED
+    assert executor.stopped == ["a"]
+    assert all(worker.task_id is None for worker in report.workers)
+    detail = "attempt 1 of 1 failed (worker_timeout); no attempts left"
+    assert detail in [t.detail for t in report.transitions]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == [f"run run task a: {detail}"]
+
+
+async def test_timed_out_attempt_is_retried():
+    executor = GatedExecutor()
+    report = await asyncio.wait_for(
+        scheduler(executor).run(plan(task("a", timeout_seconds=0.01, max_attempts=2))), 2
+    )
+    assert [a.failure_reason for a in report.attempts] == [FailureReason.WORKER_TIMEOUT] * 2
+    assert executor.stopped == ["a", "a"]
+
+
+async def test_timeout_error_raised_by_the_worker_is_an_executor_exception():
+    executor = MockExecutor(error=TimeoutError("the API was slow"))
+    report = await scheduler(executor).run(plan(task("a", timeout_seconds=60)))
+    assert report.tasks[0].failure_reason == FailureReason.EXECUTOR_EXCEPTION
+    assert report.tasks[0].message == "the API was slow"
+
+
 async def test_retry_is_logged_without_the_failure_text(caplog):
     caplog.set_level(logging.DEBUG, logger="agentforge")
     await scheduler(FlakyExecutor(message="SECRET-TOKEN")).run(plan(task("a", max_attempts=2)))

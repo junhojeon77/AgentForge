@@ -89,6 +89,7 @@ def test_worker_result_session_id_is_optional():
     assert WorkerResult(success=True, session_id="s").session_id == "s"
 
 
+def test_timeout_is_optional_and_must_be_a_positive_number():
 def test_max_attempts_defaults_to_one_and_is_bounded():
     values = {"id": "a", "run_id": "run", "title": "A", "role": "backend"}
     assert TaskSpec(**values).max_attempts == 1

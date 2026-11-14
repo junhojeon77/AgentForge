@@ -39,6 +39,7 @@ TERMINAL = frozenset(
 class FailureReason(StrEnum):
     WORKER_FAILURE = "worker_failure"
     EXECUTOR_EXCEPTION = "executor_exception"
+    WORKER_TIMEOUT = "worker_timeout"
     INVALID_RESULT = "invalid_result"
     VALIDATION_REJECTED = "validation_rejected"
     VALIDATOR_EXCEPTION = "validator_exception"
@@ -71,6 +72,8 @@ class TaskSpec(Contract):
     expected_output: tuple[str, ...] = ()
     # Capped because every attempt of a Claude Code task is billed.
     max_attempts: int = Field(1, ge=1, le=5, strict=True)
+    # Per attempt, for the worker only; None: no limit. Checks have their own timeout.
+    timeout_seconds: float | None = Field(None, gt=0, strict=True, allow_inf_nan=False)
 
 
 class RunPlan(Contract):

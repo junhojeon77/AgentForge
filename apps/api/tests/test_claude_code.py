@@ -246,6 +246,7 @@ async def test_cancel_kills_the_claude_process(workspace, monkeypatch):
     assert not is_running(fake_call(workspace)["pid"])
 
 
+async def test_timeout_kills_the_claude_process(workspace, monkeypatch):
 async def test_workspace_must_be_an_existing_folder(tmp_path):
     for workspace in (None, tmp_path / "missing"):
         with pytest.raises(ValueError, match="workspace"):

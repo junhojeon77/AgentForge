@@ -252,10 +252,18 @@ class Scheduler:
                 started = "worker resumed" if assignment.resume else "worker started"
                 if not self._transition(task_id, TaskStatus.RUNNING, detail=started):
                     return
+                seconds = assignment.task.timeout_seconds
+                limit = asyncio.timeout(seconds)
                 try:
-                    raw_result = await self._executors[worker_id].execute(assignment)
+                    async with limit:
+                        raw_result = await self._executors[worker_id].execute(assignment)
                 except Exception as error:
-                    self._fail(task_id, FailureReason.EXECUTOR_EXCEPTION, str(error))
+                    # expired(): our limit fired, not a TimeoutError the worker raised itself.
+                    if limit.expired():
+                        why = f"worker timed out after {seconds:g}s"
+                        self._fail(task_id, FailureReason.WORKER_TIMEOUT, why)
+                    else:
+                        self._fail(task_id, FailureReason.EXECUTOR_EXCEPTION, str(error))
                     return
                 if self._states[task_id].status != TaskStatus.RUNNING:  # cancelled or paused
                     return
