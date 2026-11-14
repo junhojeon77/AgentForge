@@ -35,8 +35,27 @@ permissions and human approval.
 Test public behavior, including boundary and failure cases. Use deterministic barriers, not
 sleeps, in async tests. Never weaken assertions, skip tests or change expectations to pass.
 
-**Done** means pytest and both Ruff checks pass, the diff is reviewed for correctness, unrelated
-changes and security, and exact results are reported, naming any check that was not run.
+**Done** means pytest and both Ruff checks pass, the diagnostics rule below is met, the diff is
+reviewed for correctness, unrelated changes and security, and exact results are reported, naming
+any check that was not run.
+
+## Diagnostics (required)
+
+Everything that happens in a run must be debuggable in two places. This is a must for every
+feature, not an extra:
+
+- **Report:** every state change, decision and failure records a clear, plain reason in the run
+  report (as `TaskAttempt.message` and `Transition.detail` do for retries). Someone reading only
+  the report must be able to tell what happened and why.
+- **Log:** the same events get a `logging` line through `logging.getLogger(__name__)`: DEBUG for
+  progress, WARNING for failures. The library installs no handler.
+
+Never log prompts, personas, diffs, check output or failure messages; they can hold secrets and
+belong in the report only. Log ids, statuses, reasons, paths and exit codes.
+
+A plan must say where each reason is recorded and which log line covers it. Tests must assert
+both, including that secret-bearing text stays out of the log. Document them in the milestone
+doc's "How to debug a run" section.
 
 ## Git Commit Notes
 
