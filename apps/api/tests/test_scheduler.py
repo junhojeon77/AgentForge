@@ -1,5 +1,7 @@
 import asyncio
+import collections
 import logging
+import uuid
 
 import pytest
 from pydantic import ValidationError
@@ -715,3 +717,327 @@ async def test_retry_is_logged_without_the_failure_text(caplog):
         in caplog.messages
     )
     assert "SECRET-TOKEN" not in caplog.text
+
+
+class GatedExecutor:
+    """Holds each task at its own gate and records assignments and stopped workers."""
+
+    def __init__(self, *open_tasks, on_stop=None):
+        self.assignments = []
+        self.stopped = []
+        self.on_stop = on_stop
+        self.started = collections.defaultdict(asyncio.Event)
+        self.gates = collections.defaultdict(asyncio.Event)
+        for name in open_tasks:
+            self.gates[name].set()
+
+    async def execute(self, assignment):
+        name = assignment.task.id
+        self.assignments.append(assignment)
+        self.started[name].set()
+        try:
+            await self.gates[name].wait()
+        except asyncio.CancelledError:
+            self.stopped.append(name)
+            if self.on_stop is not None:
+                raise self.on_stop from None
+            raise
+        return WorkerResult(success=True)
+
+
+async def loop_turn():
+    barrier = asyncio.Event()
+    asyncio.get_running_loop().call_soon(barrier.set)
+    await barrier.wait()
+
+
+def by_id(report):
+    return {state.task.id: state for state in report.tasks}
+
+
+async def test_paused_running_task_continues_the_same_attempt_on_resume():
+    executor = GatedExecutor("b")
+    engine = scheduler(executor)
+    running = asyncio.create_task(engine.run(plan(task("a"), task("b", dependencies=("a",)))))
+    await asyncio.wait_for(executor.started["a"].wait(), 2)
+
+    await engine.pause_task("a")
+    await engine.pause_task("a")
+    await loop_turn()
+
+    paused = engine.snapshot()
+    assert executor.stopped == ["a"]
+    assert not running.done()
+    assert by_id(paused)["a"].status == TaskStatus.PAUSED
+    assert by_id(paused)["a"].message == "pause_task was called while RUNNING"
+    assert by_id(paused)["a"].worker_id is None
+    assert by_id(paused)["b"].status == TaskStatus.PENDING
+    assert paused.attempts[0].status == TaskStatus.PAUSED
+    assert all(worker.task_id is None for worker in paused.workers)
+
+    executor.gates["a"].set()
+    await engine.resume_task("a")
+    report = await asyncio.wait_for(running, 2)
+
+    assert report.successful
+    first, again, _ = executor.assignments
+    assert (first.task.id, first.attempt_number, first.resume) == ("a", 1, False)
+    assert (again.task.id, again.attempt_number, again.resume) == ("a", 1, True)
+    assert first.session_id == again.session_id == report.attempts[0].session_id
+    uuid.UUID(first.session_id)
+    assert [(a.task_id, a.number) for a in report.attempts] == [("a", 1), ("b", 1)]
+    assert [(t.status, t.detail) for t in report.transitions if t.task_id == "a"] == [
+        (TaskStatus.PENDING, "queued"),
+        (TaskStatus.READY, "no unfinished dependencies"),
+        (TaskStatus.ASSIGNED, "attempt 1 of 1 assigned to worker worker"),
+        (TaskStatus.RUNNING, "worker started"),
+        (TaskStatus.PAUSED, "pause_task was called while RUNNING"),
+        (TaskStatus.PENDING, "resume_task was called"),
+        (TaskStatus.READY, "no unfinished dependencies"),
+        (TaskStatus.ASSIGNED, "attempt 1 of 1 resumed on worker worker"),
+        (TaskStatus.RUNNING, "worker resumed"),
+        (TaskStatus.VALIDATING, "worker reported success; validating"),
+        (TaskStatus.COMPLETED, "validation accepted"),
+    ]
+    assert by_id(report)["a"].message == ""
+
+
+async def test_paused_waiting_task_is_held_and_its_dependents_wait():
+    executor = GatedExecutor("b", "c")
+    engine = scheduler(executor)
+    running = asyncio.create_task(
+        engine.run(plan(task("a"), task("b"), task("c", dependencies=("b",))))
+    )
+    await asyncio.wait_for(executor.started["a"].wait(), 2)
+
+    await engine.pause_task("b")
+    executor.gates["a"].set()
+    await loop_turn()
+    await loop_turn()
+
+    held = by_id(engine.snapshot())
+    assert not running.done()
+    assert held["a"].status == TaskStatus.COMPLETED
+    assert (held["b"].status, held["b"].message) == (
+        TaskStatus.PAUSED,
+        "pause_task was called while READY",
+    )
+    assert (held["c"].status, held["c"].blocked_by) == (TaskStatus.PENDING, None)
+    assert [a.task.id for a in executor.assignments] == ["a"]
+
+    await engine.resume_task("b")
+    report = await asyncio.wait_for(running, 2)
+
+    assert report.successful
+    assert [(a.task.id, a.resume) for a in executor.assignments] == [
+        ("a", False),
+        ("b", False),
+        ("c", False),
+    ]
+
+
+async def test_task_paused_during_validation_reruns_only_the_validation():
+    gate = asyncio.Event()
+    validator = MockValidator(gate=gate)
+    executor = MockExecutor()
+    engine = scheduler(executor, validator)
+    running = asyncio.create_task(engine.run(plan(task("a"))))
+    await asyncio.wait_for(validator.started.wait(), 2)
+
+    await engine.pause_task("a")
+    assert engine.snapshot().tasks[0].message == "pause_task was called while VALIDATING"
+    gate.set()
+    await engine.resume_task("a")
+    report = await asyncio.wait_for(running, 2)
+
+    assert report.successful
+    assert len(executor.assignments) == 1
+    assert [t.detail for t in report.transitions][-4:] == [
+        "no unfinished dependencies",
+        "attempt 1 of 1 resumed on worker worker",
+        "validating again after a pause",
+        "validation accepted",
+    ]
+
+
+async def test_pause_run_stops_everything_and_resume_run_leaves_tasks_paused_by_hand():
+    executor = GatedExecutor()
+    engine = scheduler(executor)
+    engine.register_worker(AgentConfig(id="front", role="frontend"), executor)
+    running = asyncio.create_task(
+        engine.run(
+            plan(task("a"), task("b", role="frontend"), task("c"), task("d", dependencies=("a",)))
+        )
+    )
+    await asyncio.wait_for(
+        asyncio.gather(executor.started["a"].wait(), executor.started["b"].wait()), 2
+    )
+
+    await engine.pause_task("c")
+    await engine.pause_run()
+    await loop_turn()
+
+    paused = engine.snapshot()
+    assert not running.done()
+    assert sorted(executor.stopped) == ["a", "b"]
+    assert {s.task.id: s.message for s in paused.tasks} == {
+        "a": "pause_run was called while RUNNING",
+        "b": "pause_run was called while RUNNING",
+        "c": "pause_task was called while READY",
+        "d": "pause_run was called while PENDING",
+    }
+    assert all(s.status == TaskStatus.PAUSED for s in paused.tasks)
+    assert all(worker.task_id is None for worker in paused.workers)
+
+    for name in "abcd":
+        executor.gates[name].set()
+    await engine.resume_run()
+    await asyncio.wait_for(executor.started["d"].wait(), 2)
+    await loop_turn()
+    await loop_turn()
+
+    resumed = by_id(engine.snapshot())
+    assert not running.done()
+    assert resumed["c"].status == TaskStatus.PAUSED
+    assert [resumed[name].status for name in "abd"] == [TaskStatus.COMPLETED] * 3
+
+    await engine.resume_task("c")
+    report = await asyncio.wait_for(running, 2)
+    assert report.successful
+    assert all(t.detail for t in report.transitions)
+
+
+async def test_resumed_task_goes_back_to_the_worker_that_started_it():
+    executor = GatedExecutor("b")
+    engine = scheduler(executor)
+    engine.register_worker(AgentConfig(id="aaa", role="backend"), executor)
+    # b outranks a, so b takes the lowest-id worker and a starts on the other one.
+    running = asyncio.create_task(engine.run(plan(task("a"), task("b", priority=9))))
+    await asyncio.wait_for(executor.started["a"].wait(), 2)
+    assert [(a.task.id, a.worker.id) for a in executor.assignments] == [
+        ("b", "aaa"),
+        ("a", "worker"),
+    ]
+
+    await engine.pause_task("a")
+    executor.gates["a"].set()
+    await engine.resume_task("a")
+    report = await asyncio.wait_for(running, 2)
+
+    assert report.successful
+    assert (executor.assignments[-1].worker.id, executor.assignments[-1].resume) == ("worker", True)
+
+
+async def test_paused_task_can_be_cancelled_and_then_blocks_its_dependents():
+    executor = GatedExecutor()
+    engine = scheduler(executor)
+    running = asyncio.create_task(engine.run(plan(task("a"), task("b", dependencies=("a",)))))
+    await asyncio.wait_for(executor.started["a"].wait(), 2)
+    await engine.pause_task("a")
+    await engine.cancel_task("a")
+    await engine.resume_task("a")
+    report = await asyncio.wait_for(running, 2)
+    assert {s.task.id: (s.status, s.message) for s in report.tasks} == {
+        "a": (TaskStatus.CANCELLED, "cancel_task was called"),
+        "b": (TaskStatus.BLOCKED, "blocked by a, which is CANCELLED"),
+    }
+    assert report.attempts[0].status == TaskStatus.CANCELLED
+    assert len(executor.assignments) == 1
+
+
+async def test_pause_ignores_finished_tasks_and_rejects_unknown_ones():
+    engine = scheduler()
+    await engine.pause_run()
+    await engine.resume_run()
+    report = await engine.run(plan(task("a")))
+    await engine.pause_task("a")
+    await engine.pause_run()
+    await engine.resume_task("a")
+    assert engine.snapshot() == report
+    for command in (engine.pause_task, engine.resume_task):
+        with pytest.raises(KeyError):
+            await command("missing")
+
+
+async def test_late_error_from_a_stopped_worker_does_not_fail_a_paused_task():
+    executor = GatedExecutor(on_stop=RuntimeError("killed"))
+    engine = scheduler(executor)
+    running = asyncio.create_task(engine.run(plan(task("a", max_attempts=2))))
+    await asyncio.wait_for(executor.started["a"].wait(), 2)
+    await engine.pause_task("a")
+    await loop_turn()
+    paused = engine.snapshot()
+    assert paused.tasks[0].status == TaskStatus.PAUSED
+    assert (paused.attempts[0].status, paused.attempts[0].failure_reason) == (
+        TaskStatus.PAUSED,
+        None,
+    )
+    executor.gates["a"].set()
+    await engine.resume_task("a")
+    report = await asyncio.wait_for(running, 2)
+    assert report.successful and len(report.attempts) == 1
+
+
+async def test_task_paused_while_waiting_for_its_retry_starts_a_new_attempt_on_resume():
+    executor = GatedExecutor("g")
+    fail_once = FlakyExecutor()
+
+    class Executor:
+        async def execute(self, assignment):
+            await executor.execute(assignment)
+            return await fail_once.execute(assignment)
+
+    validating = asyncio.Event()
+    validator = MockValidator(gate=validating)
+    engine = scheduler(Executor(), validator)
+    engine.register_worker(AgentConfig(id="front", role="frontend"), Executor())
+    running = asyncio.create_task(
+        engine.run(
+            plan(
+                task("a", max_attempts=2),
+                task("g", role="frontend"),
+                # Outranks the retry of a, so it takes the only backend worker when a fails.
+                task("h", dependencies=("g",), priority=5),
+            )
+        )
+    )
+    await asyncio.wait_for(
+        asyncio.gather(executor.started["a"].wait(), validator.started.wait()), 2
+    )
+    validating.set()
+    executor.gates["a"].set()
+    await asyncio.wait_for(executor.started["h"].wait(), 2)
+    assert by_id(engine.snapshot())["a"].status == TaskStatus.READY
+
+    await engine.pause_task("a")
+    executor.gates["h"].set()
+    await engine.resume_task("a")
+    report = await asyncio.wait_for(running, 2)
+
+    assert report.successful
+    retried = [a for a in fail_once.assignments if a.task.id == "a"]
+    assert [(a.attempt_number, a.resume, a.previous_failure) for a in retried] == [
+        (1, False, ""),
+        (2, False, "flaky"),
+    ]
+    first, second = (a for a in report.attempts if a.task_id == "a")
+    assert (first.status, second.status) == (TaskStatus.FAILED, TaskStatus.COMPLETED)
+    assert first.session_id != second.session_id
+
+
+async def test_pause_and_resume_are_logged(caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    executor = GatedExecutor()
+    engine = scheduler(executor)
+    running = asyncio.create_task(engine.run(plan(task("a"))))
+    await asyncio.wait_for(executor.started["a"].wait(), 2)
+    await engine.pause_task("a")
+    executor.gates["a"].set()
+    await engine.resume_task("a")
+    await asyncio.wait_for(running, 2)
+    for line in (
+        "run run task a: PAUSED (attempt 1, worker None): pause_task was called while RUNNING",
+        "run run task a: PENDING (attempt 1, worker None): resume_task was called",
+        "run run task a: RUNNING (attempt 1, worker worker): worker resumed",
+    ):
+        assert line in caplog.messages

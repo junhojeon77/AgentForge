@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import uuid
+from collections.abc import Iterable
 from typing import Protocol
 
 from pydantic import ValidationError
@@ -55,6 +57,8 @@ class Scheduler:
         self._attempts: dict[tuple[str, int], TaskAttempt] = {}
         self._transitions: list[Transition] = []
         self._active: dict[str, asyncio.Task[None]] = {}
+        # Tasks paused by pause_run, so resume_run leaves alone what pause_task paused.
+        self._run_paused: set[str] = set()
         self._running = False
         self._run_id: str | None = None
         self._wake = asyncio.Event()
@@ -118,6 +122,7 @@ class Scheduler:
         self._states = {task.id: TaskState(task=task) for task in plan.tasks}
         self._attempts = {}
         self._transitions = []
+        self._run_paused = set()
         self._wake = asyncio.Event()
         for task in plan.tasks:
             self._record(task.id, TaskStatus.PENDING, "queued")
@@ -182,29 +187,44 @@ class Scheduler:
         for state in candidates:
             if len(self._active) >= self._cap:
                 break
+            task_id = state.task.id
+            if task_id in self._active:  # paused and resumed while its worker is still stopping
+                continue
+            number = state.attempt_number
+            attempt = self._attempts.get((task_id, number))
+            # An unfinished attempt was stopped by a pause: continue it instead of starting
+            # another, and on the worker whose model and persona the session started with.
+            resume = attempt is not None and attempt.status not in TERMINAL
             workers = sorted(
                 (
                     w
                     for w in self._workers.values()
-                    if w.task_id is None and w.agent.role == state.task.role
+                    if w.task_id is None
+                    and w.agent.role == state.task.role
+                    and (not resume or w.agent.id == attempt.worker_id)
                 ),
                 key=lambda w: w.agent.id,
             )
             if not workers:
                 continue
             worker = workers[0]
-            task_id = state.task.id
-            number = state.attempt_number + 1
-            previous_failure = self._attempts[task_id, number - 1].message if number > 1 else ""
             self._workers[worker.agent.id] = worker.model_copy(update={"task_id": task_id})
-            self._attempts[task_id, number] = TaskAttempt(
-                task_id=task_id, worker_id=worker.agent.id, number=number
-            )
+            if not resume:
+                number += 1
+                attempt = TaskAttempt(
+                    task_id=task_id,
+                    worker_id=worker.agent.id,
+                    number=number,
+                    session_id=str(uuid.uuid4()),
+                )
+                self._attempts[task_id, number] = attempt
+            previous_failure = self._attempts[task_id, number - 1].message if number > 1 else ""
             limit = state.task.max_attempts
+            verb = "resumed on" if resume else "assigned to"
             self._transition(
                 task_id,
                 TaskStatus.ASSIGNED,
-                detail=f"attempt {number} of {limit} assigned to worker {worker.agent.id}",
+                detail=f"attempt {number} of {limit} {verb} worker {worker.agent.id}",
                 worker_id=worker.agent.id,
                 attempt_number=number,
             )
@@ -213,6 +233,8 @@ class Scheduler:
                 worker=worker.agent,
                 attempt_number=number,
                 previous_failure=previous_failure,
+                session_id=attempt.session_id,
+                resume=resume,
             )
             self._active[task_id] = asyncio.create_task(
                 self._execute(assignment), name=f"agentforge:{self._run_id}:{task_id}"
@@ -222,34 +244,42 @@ class Scheduler:
         task_id, worker_id = assignment.task.id, assignment.worker.id
         attempt = (task_id, assignment.attempt_number)
         try:
-            if not self._transition(task_id, TaskStatus.RUNNING, detail="worker started"):
+            # A result already on the attempt means the pause came during validation: the
+            # worker is done, so only the validation runs again.
+            result = self._attempts[attempt].result
+            detail = "validating again after a pause"
+            if result is None:
+                started = "worker resumed" if assignment.resume else "worker started"
+                if not self._transition(task_id, TaskStatus.RUNNING, detail=started):
+                    return
+                try:
+                    raw_result = await self._executors[worker_id].execute(assignment)
+                except Exception as error:
+                    self._fail(task_id, FailureReason.EXECUTOR_EXCEPTION, str(error))
+                    return
+                if self._states[task_id].status != TaskStatus.RUNNING:  # cancelled or paused
+                    return
+                try:
+                    result = WorkerResult.model_validate(raw_result)
+                except (ValidationError, TypeError, ValueError):
+                    self._fail(task_id, FailureReason.INVALID_RESULT, "invalid worker result")
+                    return
+                self._attempts[attempt] = self._attempts[attempt].model_copy(
+                    update={"result": result}
+                )
+                if not result.success:
+                    self._fail(task_id, FailureReason.WORKER_FAILURE, result.message)
+                    return
+                detail = "worker reported success; validating"
+            if not self._transition(task_id, TaskStatus.VALIDATING, detail=detail):
                 return
-            try:
-                raw_result = await self._executors[worker_id].execute(assignment)
-            except Exception as error:
-                self._fail(task_id, FailureReason.EXECUTOR_EXCEPTION, str(error))
-                return
-            if self._states[task_id].status in TERMINAL:
-                return
-            try:
-                result = WorkerResult.model_validate(raw_result)
-            except (ValidationError, TypeError, ValueError):
-                self._fail(task_id, FailureReason.INVALID_RESULT, "invalid worker result")
-                return
-            self._attempts[attempt] = self._attempts[attempt].model_copy(update={"result": result})
-            if not result.success:
-                self._fail(task_id, FailureReason.WORKER_FAILURE, result.message)
-                return
-            self._transition(
-                task_id, TaskStatus.VALIDATING, detail="worker reported success; validating"
-            )
             try:
                 raw_validation = await self._validator.validate(assignment.task, result)
                 validation = ValidationReport.model_validate(raw_validation)
             except Exception as error:
                 self._fail(task_id, FailureReason.VALIDATOR_EXCEPTION, str(error))
                 return
-            if self._states[task_id].status in TERMINAL:
+            if self._states[task_id].status != TaskStatus.VALIDATING:  # cancelled or paused
                 return
             self._attempts[attempt] = self._attempts[attempt].model_copy(
                 update={"validation": validation}
@@ -260,7 +290,9 @@ class Scheduler:
                 self._fail(task_id, FailureReason.VALIDATION_REJECTED, "; ".join(validation.issues))
         except asyncio.CancelledError:
             # After cancel_task or cancel_run the task is already terminal and this is a no-op.
-            self._cancel(task_id, "worker task was cancelled")
+            # A paused task was stopped on purpose and must stay paused.
+            if self._states[task_id].status != TaskStatus.PAUSED:
+                self._cancel(task_id, "worker task was cancelled")
             raise
         finally:
             # Still mid-flight here means a BaseException bypassed the handlers above. A task
@@ -279,7 +311,9 @@ class Scheduler:
 
     def _fail(self, task_id: str, reason: FailureReason, message: str) -> None:
         state = self._states[task_id]
-        if state.status in TERMINAL:
+        # Only work in flight can fail: a late error from a worker that was stopped by a pause
+        # or a cancellation changes nothing.
+        if state.status not in (TaskStatus.RUNNING, TaskStatus.VALIDATING):
             return
         number, limit = state.attempt_number, state.task.max_attempts
         # A validator that cannot run is a setup problem; a rerun would bill the worker again.
@@ -325,24 +359,30 @@ class Scheduler:
         if task_id not in self._states:
             raise KeyError(task_id)
         self._cancel(task_id, "cancel_task was called")
-        active = self._active.get(task_id)
-        if active is not None:
-            if not active.cancelling():
-                active.cancel()
-            await asyncio.gather(active, return_exceptions=True)
-            # A coroutine cancelled before its first step does not run finally.
-            self._release_unstarted(task_id, active)
+        await self._stop([task_id])
+
+    async def _stop(self, task_ids: Iterable[str]) -> None:
+        """Stop these tasks' workers and wait for their cleanup."""
+        active = [
+            (task_id, self._active[task_id]) for task_id in task_ids if task_id in self._active
+        ]
+        for _, future in active:
+            if not future.cancelling():
+                future.cancel()
+        if active:
+            await asyncio.gather(*(future for _, future in active), return_exceptions=True)
+            for task_id, future in active:
+                # A coroutine cancelled before its first step does not run finally.
+                self._release_unstarted(task_id, future)
         self._wake.set()
 
     def _release_unstarted(self, task_id: str, future: asyncio.Task[None]) -> None:
         if self._active.get(task_id) is not future:
             return
         self._active.pop(task_id)
-        state = self._states[task_id]
-        if state.worker_id is not None:
-            self._workers[state.worker_id] = self._workers[state.worker_id].model_copy(
-                update={"task_id": None}
-            )
+        # From the attempt, not the task state: a paused task's state no longer names a worker.
+        worker_id = self._attempts[task_id, self._states[task_id].attempt_number].worker_id
+        self._workers[worker_id] = self._workers[worker_id].model_copy(update={"task_id": None})
 
     async def cancel_run(self) -> None:
         await self._cancel_all("cancel_run was called")
@@ -350,12 +390,51 @@ class Scheduler:
     async def _cancel_all(self, why: str) -> None:
         for task_id in self._states:
             self._transition(task_id, TaskStatus.CANCELLED, detail=why, message=why)
-        active = tuple(self._active.items())
-        for _, future in active:
-            if not future.cancelling():
-                future.cancel()
-        if active:
-            await asyncio.gather(*(future for _, future in active), return_exceptions=True)
-            for task_id, future in active:
-                self._release_unstarted(task_id, future)
+        await self._stop(tuple(self._active))
+
+    def _hold(self, task_ids: Iterable[str], why: str) -> list[str]:
+        """Mark these unfinished tasks PAUSED; returns the ones that changed."""
+        held = []
+        for task_id in task_ids:
+            before = self._states[task_id].status
+            if before in TERMINAL or before == TaskStatus.PAUSED:
+                continue
+            detail = f"{why} while {before}"
+            self._transition(
+                task_id, TaskStatus.PAUSED, detail=detail, message=detail, worker_id=None
+            )
+            held.append(task_id)
+        return held
+
+    def _paused(self, task_ids: Iterable[str]) -> list[str]:
+        return [t for t in task_ids if self._states[t].status == TaskStatus.PAUSED]
+
+    async def pause_task(self, task_id: str) -> None:
+        """Hold a task. A running worker is stopped; resume continues the same attempt."""
+        if task_id not in self._states:
+            raise KeyError(task_id)
+        self._hold([task_id], "pause_task was called")
+        # Also when it was paused already: a repeated pause waits for the same cleanup.
+        await self._stop(self._paused([task_id]))
+
+    async def pause_run(self) -> None:
+        """Hold every unfinished task. `run()` keeps waiting until they are resumed."""
+        self._run_paused.update(self._hold(tuple(self._states), "pause_run was called"))
+        await self._stop(self._paused(self._states))
+
+    def _release(self, task_ids: Iterable[str], why: str) -> None:
+        for task_id in task_ids:
+            self._run_paused.discard(task_id)
+            if self._states[task_id].status == TaskStatus.PAUSED:
+                # PENDING, so dispatch checks the dependencies again like any waiting task.
+                self._transition(task_id, TaskStatus.PENDING, detail=why, message="")
         self._wake.set()
+
+    async def resume_task(self, task_id: str) -> None:
+        if task_id not in self._states:
+            raise KeyError(task_id)
+        self._release([task_id], "resume_task was called")
+
+    async def resume_run(self) -> None:
+        """Resume what pause_run paused; a task paused by pause_task stays paused."""
+        self._release(sorted(self._run_paused), "resume_run was called")

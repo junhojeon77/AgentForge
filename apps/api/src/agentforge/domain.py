@@ -96,6 +96,9 @@ class Assignment(Contract):
     worker: AgentConfig
     attempt_number: int = 1
     previous_failure: str = ""  # why the last attempt failed; empty on the first
+    # Chosen by the scheduler, so an attempt stopped by a pause can still be continued.
+    session_id: str | None = None
+    resume: bool = False  # continue this attempt's interrupted work instead of starting it
 
 
 class TaskState(Contract):
@@ -122,6 +125,7 @@ class TaskAttempt(Contract):
     validation: ValidationReport | None = None
     failure_reason: FailureReason | None = None
     message: str = ""
+    session_id: str | None = None
 
 
 class Transition(Contract):
