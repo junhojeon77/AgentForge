@@ -1,12 +1,18 @@
-"""python -m agentforge: the five-worker mock demo; `setup` creates the persona folder."""
+"""python -m agentforge: the five-worker mock demo, `setup` for the persona folder, and `claude`
+to run one read-only task with Claude Code."""
 
+import argparse
 import asyncio
+import os
 import sys
+from collections.abc import Sequence
+from pathlib import Path
 
-from agentforge.domain import RunPlan, TaskSpec, WorkerResult
+from agentforge.claude_code import ClaudeCodeExecutor
+from agentforge.domain import RunPlan, RunReport, TaskSpec, WorkerResult
 from agentforge.mocks import DEFAULT_ROLES, MockExecutor, MockValidator, register_default_workers
 from agentforge.orchestration import Scheduler
-from agentforge.personas import default_folder, setup
+from agentforge.personas import default_agents, default_folder, load_agents, setup
 
 
 async def main() -> None:
@@ -55,10 +61,60 @@ async def main() -> None:
         await asyncio.gather(running, started, return_exceptions=True)
 
 
-if __name__ == "__main__":
-    if sys.argv[1:] == ["setup"]:
+async def run_claude(plan: RunPlan, command: Sequence[str]) -> RunReport:
+    """Run `plan` read-only with Claude Code, one worker per agent in the persona folder."""
+    scheduler = Scheduler(validator=MockValidator())
+    claude = ClaudeCodeExecutor(command=command)
+    for agent in load_agents(default_folder()) or default_agents():
+        scheduler.register_worker(agent, claude)
+    return await scheduler.run(plan)
+
+
+def cli(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m agentforge", description=__doc__)
+    modes = parser.add_subparsers(dest="mode", metavar="{setup,claude}")
+    modes.add_parser("setup", help="create the agent persona folder")
+    claude = modes.add_parser(
+        "claude", help="run one read-only task with Claude Code (billed to your Claude login)"
+    )
+    claude.add_argument("title", help="what the worker should do")
+    claude.add_argument("--workspace", default=".", help="the folder to work in (default: here)")
+    claude.add_argument("--role", default="qa", help="which agent's role runs it (default: qa)")
+    claude.add_argument("--timeout", type=float, help="seconds before the worker is stopped")
+    claude.add_argument(
+        "--command",
+        nargs="+",
+        default=(os.environ.get("AGENTFORGE_CLAUDE", "claude"),),
+        metavar="PROGRAM",
+        help="path to claude.exe and any arguments (default: $AGENTFORGE_CLAUDE, else claude)",
+    )
+    args = parser.parse_args(argv)
+    if args.mode == "setup":
         print(f"Agent personas are in {setup(default_folder())}")
-    elif sys.argv[1:]:
-        sys.exit("usage: python -m agentforge [setup]")
-    else:
+        return 0
+    if args.mode is None:
         asyncio.run(main())
+        return 0
+    workspace = Path(args.workspace).resolve()
+    if not workspace.is_dir():
+        claude.error(f"workspace is not a folder: {workspace}")
+    try:
+        task = TaskSpec(
+            id="task",
+            run_id="cli",
+            title=args.title,
+            role=args.role,
+            workspace_reference=str(workspace),
+            timeout_seconds=args.timeout,
+        )
+        print("AgentForge: this run is billed to your Claude Code login.", file=sys.stderr)
+        # A bad plan, such as a role no agent has, raises before Claude starts.
+        report = asyncio.run(run_claude(RunPlan(id="cli", tasks=(task,)), args.command))
+    except ValueError as error:
+        claude.error(str(error))
+    print(report.model_dump_json(indent=2))
+    return 0 if report.successful else 1
+
+
+if __name__ == "__main__":
+    sys.exit(cli())

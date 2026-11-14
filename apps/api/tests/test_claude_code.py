@@ -9,12 +9,14 @@ import uuid
 
 import pytest
 
+from agentforge.__main__ import cli
 from agentforge.claude_code import ClaudeCodeExecutor
 from agentforge.domain import (
     AgentConfig,
     Assignment,
     FailureReason,
     RunPlan,
+    RunReport,
     TaskSpec,
     TaskStatus,
     WorkerResult,
@@ -247,6 +249,52 @@ async def test_cancel_kills_the_claude_process(workspace, monkeypatch):
 
 
 async def test_timeout_kills_the_claude_process(workspace, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "hang")
+    started = asyncio.Event()
+    claude = executor(on_event=lambda task_id, event: started.set())
+    engine = Scheduler(validator=MockValidator())
+    engine.register_worker(AgentConfig(id="w", role="backend"), claude)
+    slow = TaskSpec.model_validate(task(workspace).model_dump() | {"timeout_seconds": 3})
+    report = await asyncio.wait_for(engine.run(RunPlan(id="run", tasks=(slow,))), 10)
+    assert started.is_set()  # the fake CLI was running when the limit hit
+    assert report.tasks[0].failure_reason == FailureReason.WORKER_TIMEOUT
+    assert not is_running(fake_call(workspace)["pid"])
+
+
+def test_cli_runs_one_task_with_claude_code(workspace, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))  # no personas: the defaults
+    code = cli(
+        ["claude", "Read the file", "--workspace", str(workspace), "--timeout", "30",
+         "--command", sys.executable, str(FAKE_CLAUDE)]
+    )  # fmt: skip
+    out, err = capsys.readouterr()
+    report = RunReport.model_validate_json(out)
+    assert code == 0
+    assert report.tasks[0].status == TaskStatus.COMPLETED
+    assert report.tasks[0].task.role == "qa" and report.tasks[0].task.timeout_seconds == 30
+    call = fake_call(workspace)
+    assert "Read the file" in call["stdin"]
+    assert pathlib.Path(call["cwd"]).samefile(workspace)
+    assert flag(call["argv"], "--tools") == "Read,Glob,Grep"
+    assert "--append-system-prompt" in call["argv"]  # the default qa persona
+    assert "billed" in err
+
+
+def test_cli_rejects_an_unknown_role_before_starting_claude(workspace, tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    with pytest.raises(SystemExit) as stopped:
+        cli(["claude", "Read the file", "--workspace", str(workspace), "--role", "nobody",
+             "--command", sys.executable, str(FAKE_CLAUDE)])  # fmt: skip
+    assert stopped.value.code == 2
+    assert not (workspace.parent / "call.json").exists()
+
+
+def test_cli_rejects_a_missing_workspace(tmp_path):
+    with pytest.raises(SystemExit) as stopped:
+        cli(["claude", "Read the file", "--workspace", str(tmp_path / "missing")])
+    assert stopped.value.code == 2
+
+
 async def test_workspace_must_be_an_existing_folder(tmp_path):
     for workspace in (None, tmp_path / "missing"):
         with pytest.raises(ValueError, match="workspace"):
