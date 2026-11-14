@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
 
 
+def _check_id(value: str) -> None:
+    if not _SAFE_ID.fullmatch(value):
+        raise ValueError(f"worktree id {value!r} may use only A-Z, a-z, 0-9, '-' and '_'")
+
+
 async def _git(cwd: str | Path, *args: str) -> str:
     proc = await asyncio.create_subprocess_exec("git", *args, cwd=cwd, stdout=PIPE, stderr=PIPE)
     try:
@@ -56,6 +61,43 @@ async def diff(path: str | Path) -> str:
 async def remove(repo: str | Path, path: str | Path) -> None:
     """Delete the worktree and its uncommitted changes."""
     await _git(repo, "worktree", "remove", "--force", str(path))
+    logger.debug("worktree removed: %s", path)
+
+
+def _attempt_folders(root: str | Path, run_id: str) -> tuple[Path, list[Path]]:
+    _check_id(run_id)
+    run = Path(root).resolve() / run_id
+    return run, sorted(path for path in run.glob("*/*") if path.is_dir())
+
+
+def _remove_empty_folders(run: Path) -> None:
+    for folder in (*run.glob("*"), run):  # the <task_id> folders, then the run's own
+        if folder.is_dir() and not any(folder.iterdir()):
+            folder.rmdir()
+
+
+async def remove_run(repo: str | Path, root: str | Path, run_id: str) -> list[Path]:
+    """Delete every worktree under root/<run_id>, with its uncommitted changes.
+
+    Nothing calls this automatically: worktrees are kept for review until you ask. Call it only
+    after the run has finished.
+    """
+    run, folders = _attempt_folders(root, run_id)
+    removed, kept = [], []
+    for path in folders:
+        try:
+            await remove(repo, path)
+        except RuntimeError as error:
+            # Only what Git knows as a worktree is deleted; any other folder may be someone's
+            # files. The path only: Git's message stays in the error for the caller.
+            logger.warning("worktree not removed: %s", path)
+            kept.append(f"{path}: {error}")
+        else:
+            removed.append(path)
+    _remove_empty_folders(run)
+    if kept:
+        raise RuntimeError("worktrees not removed: " + "; ".join(kept))
+    return removed
 
 
 class WorktreeExecutor:
@@ -74,9 +116,8 @@ class WorktreeExecutor:
         task = assignment.task
         if not task.repository_reference:
             raise ValueError(f"task {task.id} needs a repository_reference")
-        for value in (task.run_id, task.id):
-            if not _SAFE_ID.fullmatch(value):
-                raise ValueError(f"worktree id {value!r} may use only A-Z, a-z, 0-9, '-' and '_'")
+        _check_id(task.run_id)
+        _check_id(task.id)
         path = self.root / task.run_id / task.id / str(assignment.attempt_number)
         # Only an attempt the scheduler is resuming may reuse its worktree; its edits and its
         # saved Claude session live there. A single local stat; not worth a thread hop.

@@ -1,5 +1,5 @@
-"""python -m agentforge: the five-worker mock demo, `setup` for the persona folder, and `claude`
-to run one read-only task with Claude Code."""
+"""python -m agentforge: the five-worker mock demo, `setup` for the persona folder, `claude` to
+run one read-only task with Claude Code, and `clean` to delete a finished run's worktrees."""
 
 import argparse
 import asyncio
@@ -8,6 +8,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from agentforge import worktrees
 from agentforge.claude_code import ClaudeCodeExecutor
 from agentforge.domain import RunPlan, RunReport, TaskSpec, WorkerResult
 from agentforge.mocks import DEFAULT_ROLES, MockExecutor, MockValidator, register_default_workers
@@ -72,7 +73,7 @@ async def run_claude(plan: RunPlan, command: Sequence[str]) -> RunReport:
 
 def cli(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agentforge", description=__doc__)
-    modes = parser.add_subparsers(dest="mode", metavar="{setup,claude}")
+    modes = parser.add_subparsers(dest="mode", metavar="{setup,claude,clean}")
     modes.add_parser("setup", help="create the agent persona folder")
     claude = modes.add_parser(
         "claude", help="run one read-only task with Claude Code (billed to your Claude login)"
@@ -88,12 +89,31 @@ def cli(argv: Sequence[str] | None = None) -> int:
         metavar="PROGRAM",
         help="path to claude.exe and any arguments (default: $AGENTFORGE_CLAUDE, else claude)",
     )
+    clean = modes.add_parser(
+        "clean", help="delete every worktree of a finished run, with its uncommitted changes"
+    )
+    clean.add_argument("run_id", help="the id of the run")
+    clean.add_argument("--repo", required=True, help="the repository the worktrees belong to")
+    clean.add_argument("--root", required=True, help="the folder given to WorktreeExecutor")
     args = parser.parse_args(argv)
     if args.mode == "setup":
         print(f"Agent personas are in {setup(default_folder())}")
         return 0
     if args.mode is None:
         asyncio.run(main())
+        return 0
+    if args.mode == "clean":
+        try:
+            removed = asyncio.run(worktrees.remove_run(args.repo, args.root, args.run_id))
+        except ValueError as error:
+            clean.error(str(error))
+        except RuntimeError as error:  # some folders were kept; the error names each one
+            print(error, file=sys.stderr)
+            return 1
+        for path in removed:
+            print(path)
+        if not removed:
+            print(f"No worktrees found for run {args.run_id}.")
         return 0
     workspace = Path(args.workspace).resolve()
     if not workspace.is_dir():

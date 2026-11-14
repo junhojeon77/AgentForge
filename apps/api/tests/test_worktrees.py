@@ -8,6 +8,7 @@ import pytest
 from test_claude_code import FAKE_CLAUDE, fake_call, flag, is_running
 
 from agentforge import worktrees
+from agentforge.__main__ import cli
 from agentforge.claude_code import ClaudeCodeExecutor
 from agentforge.domain import (
     AgentConfig,
@@ -122,6 +123,64 @@ async def test_remove_deletes_a_changed_worktree(repo, tmp_path):
     await worktrees.remove(repo, path)
     assert not path.exists()
     assert len(git(repo, "worktree", "list").splitlines()) == 1
+
+
+async def test_remove_run_deletes_every_worktree_of_that_run_only(repo, tmp_path, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    root = tmp_path / "trees"
+    executor = WorktreeExecutor(MockExecutor(), root)
+    first = await executor.execute(assignment(repo))
+    retry = await executor.execute(assignment(repo).model_copy(update={"attempt_number": 2}))
+    other = await executor.execute(assignment(repo, run_id="other"))
+    (pathlib.Path(first.workspace) / "scratch.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    removed = await worktrees.remove_run(repo, root, "run")
+
+    assert removed == [pathlib.Path(first.workspace), pathlib.Path(retry.workspace)]
+    assert not (root / "run").exists()
+    assert pathlib.Path(other.workspace).is_dir()  # noqa: ASYNC240
+    assert len(git(repo, "worktree", "list").splitlines()) == 2  # the checkout and "other"
+    assert git(repo, "status", "--porcelain") == ""
+    assert f"worktree removed: {first.workspace}" in caplog.messages
+    assert f"worktree removed: {retry.workspace}" in caplog.messages
+
+
+async def test_remove_run_keeps_a_folder_git_does_not_know_and_names_it(repo, tmp_path, caplog):
+    root = tmp_path / "trees"
+    real = await WorktreeExecutor(MockExecutor(), root).execute(assignment(repo))
+    stray = root / "run" / "b" / "1"
+    stray.mkdir(parents=True)
+    (stray / "keep.txt").write_text("SECRET-TOKEN\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="worktrees not removed") as error:
+        await worktrees.remove_run(repo, root, "run")
+
+    assert str(stray) in str(error.value)
+    assert (stray / "keep.txt").exists()
+    assert not pathlib.Path(real.workspace).exists()  # noqa: ASYNC240  the real one still went
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == [f"worktree not removed: {stray}"]
+
+
+async def test_remove_run_rejects_an_unsafe_id_and_ignores_a_run_with_no_worktrees(repo, tmp_path):
+    with pytest.raises(ValueError, match="may use only"):
+        await worktrees.remove_run(repo, tmp_path, "..")
+    assert repo.is_dir()
+    assert await worktrees.remove_run(repo, tmp_path / "trees", "never-ran") == []
+
+
+def test_cli_clean_removes_a_runs_worktrees(repo, tmp_path, capsys):
+    root = tmp_path / "trees"
+    kept = asyncio.run(WorktreeExecutor(MockExecutor(), root).execute(assignment(repo)))
+
+    code = cli(["clean", "run", "--repo", str(repo), "--root", str(root)])
+
+    assert code == 0
+    assert kept.workspace in capsys.readouterr().out
+    assert not (root / "run").exists()
+    with pytest.raises(SystemExit) as stopped:
+        cli(["clean", "..", "--repo", str(repo), "--root", str(root)])
+    assert stopped.value.code == 2
 
 
 @pytest.mark.parametrize("changes", [{"id": ".."}, {"id": "a/b"}, {"run_id": "..\\x"}])
