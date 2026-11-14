@@ -31,7 +31,8 @@ Outcome mapping:
   Anything else, a missing `repository_reference`, or any Git failure raises →
   `EXECUTOR_EXCEPTION`.
 - A worktree path that already exists (the same run id, task id and attempt number again) is a
-  Git failure. Nothing is overwritten.
+  Git failure. Nothing is overwritten. The one exception, since [M4](M4-orchestration.md): an
+  attempt the scheduler resumes after a pause reuses its own worktree.
 - A check that exits non-zero, times out, or is not in `checks` → the task is rejected
   (`VALIDATION_REJECTED`) with the check's name and the last 2,000 characters of its output.
 - No workspace folder → rejected. A check program that cannot be started → `VALIDATOR_EXCEPTION`.

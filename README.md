@@ -3,8 +3,8 @@
 A local-first Windows platform where one lead agent coordinates specialized coding agents. It ships
 with five, and you can add, remove or fully customize any of them.
 
-**Status:** M1–M3 and task retries (the first part of M4) are implemented as a Python library. The
-desktop app, REST API, persistence and the lead agent are planned, not built.
+**Status:** M1–M3 and the first two parts of M4 (task retries and pause/resume) are implemented as
+a Python library. The desktop app, REST API, persistence and the lead agent are planned, not built.
 
 ## What is AgentForge
 
@@ -63,6 +63,8 @@ flowchart LR
   Independent branches keep running.
 - **Retries start clean.** A task can allow up to five attempts. Each retry gets a fresh worktree
   and session and is told why the last attempt failed.
+- **Pause and resume.** Pausing a task or the run stops its workers at once. Resuming continues
+  the same attempt in the same worktree and Claude session.
 - **Clean cancellation.** Cancelling a task or a run stops its work and waits for cleanup. For
   Claude Code this kills the CLI process.
 - **Restricted Claude Code worker.** Each task gets one `claude -p` process limited to the Read,
@@ -207,7 +209,23 @@ logging.basicConfig(level=logging.DEBUG)
 Logs never contain prompts, diffs or check output. What each line means, and where to look when a
 run goes wrong, is in [the M4 doc](docs/milestones/M4-orchestration.md#how-to-debug-a-run).
 
-### 6. Verify
+### 6. Pause and resume
+
+While `scheduler.run(plan)` is running as an asyncio task, call these from the same event loop:
+
+```python
+    await scheduler.pause_task("t1")   # or: await scheduler.pause_run()
+    ...
+    await scheduler.resume_task("t1")  # or: await scheduler.resume_run()
+```
+
+A task that has not started is held. A running task's Claude process is killed and its worker is
+freed; resume continues the same attempt in the same worktree with `claude --resume`, so it does
+not use up a retry. `run()` does not return while anything is paused, and `resume_run` leaves a
+task you paused with `pause_task` paused. Limits, such as a file left half-written by the kill,
+are in [the M4 doc](docs/milestones/M4-orchestration.md#limits).
+
+### 7. Verify
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest apps/api/tests
@@ -264,5 +282,5 @@ app (M6), which will call these same functions.
   outcome mapping, the live check and deferred work.
 - [M3: worktrees and validation](docs/milestones/M3-worktrees.md): worktrees, edit mode, diffs,
   check commands, risks and deferred work.
-- [M4: retries](docs/milestones/M4-orchestration.md): retry rules, how to debug a run, limits and
-  the M4 parts still planned.
+- [M4: retries and pause/resume](docs/milestones/M4-orchestration.md): retry rules, pause and
+  resume, how to debug a run, limits and the M4 parts still planned.

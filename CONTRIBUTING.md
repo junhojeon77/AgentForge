@@ -81,7 +81,9 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   `workspace` and `diff` are set by executors, never by the model. `TaskSpec.allowed_operations`
   containing `"edit"` is what lets a Claude Code worker edit files. `TaskSpec.max_attempts`
   (1–5, default 1) allows retries; `Assignment.previous_failure`, `TaskState.attempt_number`,
-  `TaskAttempt.message` and `Transition.detail` record them.
+  `TaskAttempt.message` and `Transition.detail` record them. `Assignment.session_id` (chosen by
+  the scheduler, kept on `TaskAttempt.session_id`) and `Assignment.resume` let an attempt stopped
+  by a pause be continued.
 - **`orchestration.py`: `Scheduler`.** Two `Protocol` seams are where workers and validators plug
   in: `WorkerExecutor.execute(Assignment) -> WorkerResult` (mock or Claude Code) and
   `ResultValidator.validate(TaskSpec, WorkerResult) -> ValidationReport` (mock or
@@ -102,6 +104,14 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
     FAILED, because FAILED is terminal and would block descendants. Otherwise the task fails.
     Attempts are keyed by `(task_id, number)`; `_transition()` leaves an already-finished attempt
     alone, so cancelling a task that waits for its retry keeps the failed attempt's record.
+  - Pause/resume: `pause_task`/`pause_run` mark unfinished tasks PAUSED (`_hold()`), then stop
+    their workers with `_stop()`, the same helper cancellation uses. PAUSED is not terminal, so
+    `run()` keeps waiting. `resume_*` put tasks back to PENDING. In `_dispatch()` an attempt that
+    is not finished means "stopped by a pause": it is continued (`Assignment.resume`), with the
+    same number and session id, and only on the worker that started it. `_execute()` skips the
+    worker when the attempt already has a result (paused during validation). After each await
+    it checks that the task is still RUNNING or VALIDATING, and `_fail()` ignores anything
+    else, so a stopped worker's late result or error cannot change a paused task.
   - Diagnostics: every `_transition()`/`_record()` call passes a `detail` saying why, so no
     `Transition.detail` is empty. BLOCKED and CANCELLED also put it in `TaskState.message`
     (`_block_descendants()`, `_cancel()`, `_cancel_all()`). `_record()` logs every transition
@@ -135,7 +145,9 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   `--append-system-prompt`, the `WorkerResult` schema via `--json-schema`, and a
   `--max-budget-usd` cap. Every event goes to `on_event`; the final `result.structured_output`
   becomes the `WorkerResult`. On a retry the prompt also carries `previous_failure`, labelled as
-  data, not instructions. An error result → `WORKER_FAILURE`, no result →
+  data, not instructions. The session id comes from `Assignment.session_id`. With
+  `Assignment.resume` it runs `--resume <id>` and a short "continue" prompt instead; if the CLI
+  says it has no such session, it starts one fresh session in the same folder. An error result → `WORKER_FAILURE`, no result →
   `EXECUTOR_EXCEPTION`, and cancellation kills the process. The CLI is usually not on PATH: pass
   `command=(<path to the VS Code extension's claude.exe>,)`.
 - **`worktrees.py`: one checkout per task.** `create`, `diff` and `remove` are thin async
@@ -145,7 +157,8 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   external diff programs off, because worktree content is untrusted. `WorktreeExecutor(inner,
   root)` wraps another executor: it creates `root/<run_id>/<task_id>/<attempt>` (ids limited to
   `[A-Za-z0-9_-]+`), runs `inner` there and adds `workspace` and `diff` to the result. Each retry
-  gets a new worktree. Worktrees are kept, never reused, and not sandboxes.
+  gets a new worktree. Worktrees are kept, are not sandboxes, and are reused only by an attempt
+  that is being resumed after a pause.
 - **`validation.py`: `CommandValidator`.** Runs each `check:<name>` constraint as a configured
   argv (no shell) in the result's workspace with a timeout. It rejects on a non-zero exit, a
   timeout or an unknown check, and never reads the worker's `passed_checks`. Timeout and
@@ -164,8 +177,8 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
 
 Tests are in `apps/api/tests/`:
 - `test_contracts.py`: contract validation and immutability.
-- `test_scheduler.py`: dispatch, failure, retries, cancellation, race behavior, log lines and a
-  demo smoke test.
+- `test_scheduler.py`: dispatch, failure, retries, pause/resume, cancellation, race behavior, log
+  lines and a demo smoke test. `GatedExecutor` holds each task at its own gate.
 - `test_personas.py`: the persona folder.
 - `test_claude_code.py`: the Claude Code executor. It uses `fake_claude.py`, which replays
   `fixtures/claude_stream.jsonl` (a trimmed live recording). Its live test is opt-in.

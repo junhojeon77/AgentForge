@@ -24,7 +24,7 @@ M2 originally named a Codex adapter on the roadmap. It was switched to Claude Co
 | `AgentConfig.reasoning` | Passed as `--effort`; must be `low`, `medium`, `high`, `xhigh` or `max` |
 | `AgentConfig.persona` | Passed as `--append-system-prompt` when not empty (max 10,000 characters); loaded from the persona folder by `agentforge.personas` |
 | `TaskSpec.workspace_reference` | Required existing folder; becomes the process working directory |
-| `WorkerResult.session_id` | A fresh UUID per task, passed as `--session-id` and set on every result |
+| `WorkerResult.session_id` | A fresh UUID per attempt, passed as `--session-id` and set on every result. Since M4 the scheduler chooses it (`Assignment.session_id`); the executor makes one up only when called without it |
 | `on_event(task_id, event)` | Receives every raw stream-json event (dict) as it arrives |
 
 Flags used on every call: `-p --output-format stream-json --verbose --json-schema <schema>
@@ -70,7 +70,7 @@ are supported.
 
 | Deferred | Waits for |
 |---|---|
-| Session resume | M4 (pause/resume). Session IDs are already recorded for it; the CLI's `--resume` is not used yet. Retries are done in [M4](M4-orchestration.md): each one starts a new session. |
+| Session resume | Done in [M4](M4-orchestration.md): a paused task continues its session with `--resume`. Retries are also done there; each one starts a new session. |
 | Edit permissions and worktrees | Done in [M3](M3-worktrees.md): a task can allow `"edit"`. Workers still cannot run commands. |
 | A per-task timeout | Later runtime work. For now `cancel_task` stops a stuck worker. |
 | A Claude Code mode for `python -m agentforge` | When wanted; the demo stays mock-only. |

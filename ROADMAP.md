@@ -4,16 +4,16 @@ The goal: one lead agent coordinates specialized coding agents. Five ship by def
 can add, remove or fully customize any of them. Adding, removing and editing agent files works
 today (M2). On-screen editing is planned for M6.
 
-AgentForge is built in milestones. M1, M2, M3 and the retry part of M4 are implemented. The rest is
-direction, not a promise, and not permission to start a later milestone early (see
-[GOVERNANCE.md](GOVERNANCE.md)).
+AgentForge is built in milestones. M1, M2, M3 and the retry and pause/resume parts of M4 are
+implemented. The rest is direction, not a promise, and not permission to start a later milestone
+early (see [GOVERNANCE.md](GOVERNANCE.md)).
 
 | Milestone | Scope | Status |
 |---|---|---|
 | M1 | Domain contracts, deterministic scheduler, five mock workers | Implemented within [documented limits](docs/milestones/M1-domain.md) |
 | M2 | Read-only Claude Code worker, model/effort settings, session IDs, structured results, event callback, editable agent personas | Implemented within [documented limits](docs/milestones/M2-claude-code.md) |
 | M3 | One Git worktree per task, edit-capable workers that cannot run commands, recorded diffs, a validator that runs check commands | Implemented within [documented limits](docs/milestones/M3-worktrees.md) |
-| M4 | Lead orchestration, retries, pause/resume, persistence and recovery | Retries implemented within [documented limits](docs/milestones/M4-orchestration.md); the rest is planned |
+| M4 | Lead orchestration, retries, pause/resume, persistence and recovery | Retries and pause/resume implemented within [documented limits](docs/milestones/M4-orchestration.md); persistence, recovery and the lead are planned |
 | M5 | FastAPI REST commands, approvals and SSE events | Planned |
 | M6 | Tauri 2 desktop dashboard (React, TypeScript), including on-screen agent editing | Planned |
 | M7 | Integration candidates, conflict detection, review and approved integration | Planned |
@@ -22,17 +22,18 @@ direction, not a promise, and not permission to start a later milestone early (s
 FastAPI, SQLite/SQLAlchemy/Alembic, LangGraph, Tauri and the frontend stack are planned, not
 installed. Add each only when its milestone is approved.
 
-## Deferred from M2, M3 and M4's retries
+## Deferred from M2, M3 and the built parts of M4
 
-Session resume (M4), a per-task timeout for workers, a Claude Code demo mode,
+A per-task timeout for workers, a Claude Code demo mode,
 model-string validation and `AgentConfig.permissions`. Details are in the M2 doc's
 ["Not implemented yet"](docs/milestones/M2-claude-code.md#not-implemented-yet) table.
 From M3: workers running commands themselves, a sandbox or resource limits for checks, automatic
 worktree cleanup and a live test of edit mode. Details are in the
 [M3 doc](docs/milestones/M3-worktrees.md#not-implemented-yet).
-From M4's retries: a delay between attempts and a manual retry command. Details are in the
+From M4's retries and pause/resume: a delay between attempts, a manual retry command and a pause
+that lets running work finish. Details are in the
 [M4 doc](docs/milestones/M4-orchestration.md#not-implemented-yet).
-`PAUSED`, pause/resume and recovery are still reserved for the rest of M4.
+Persistence, recovery and the lead agent are the parts of M4 still to build.
 
 ## Guidance for planned milestones
 
@@ -54,6 +55,13 @@ From M4's retries: a delay between attempts and a manual retry command. Details 
   calls the existing `agentforge.personas` functions.
 
 ## Verification history
+
+Verified on 2026-11-13 after M4's pause/resume: **119 tests passed and 1 skipped** (the opt-in live
+Claude Code test), Ruff lint passed, and all 21 Python files passed the formatting check.
+Separately, three approved live calls (Claude Code 2.1.323, $0.026 reported) confirmed that a
+killed read-only session can be resumed with `--resume` and the flags AgentForge uses; see
+[the M4 doc](docs/milestones/M4-orchestration.md#live-check-2026-11-13-claude-code-cli-21323).
+Resuming an edit-mode session has not been tried live.
 
 Verified on 2026-11-13 after giving every transition a reason: **102 tests passed and 1 skipped**
 (the opt-in live Claude Code test), Ruff lint passed, and all 21 Python files passed the

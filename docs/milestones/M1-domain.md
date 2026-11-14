@@ -94,8 +94,8 @@ keep cancellation waiting; forced process termination and timeouts are future ru
 all scheduler methods from the same event loop, not arbitrary threads. Worker reservations are
 released on every completed cleanup path, including cancellation before a coroutine starts.
 
-`PAUSED` is reserved in the enum. Retries were added in [M4](M4-orchestration.md). Pause/resume,
-reactivation of blocked tasks, durable checkpoints, and restart recovery are still planned for M4.
+Retries and pause/resume (the `PAUSED` status) were added in [M4](M4-orchestration.md).
+Reactivation of blocked tasks, durable checkpoints, and restart recovery are still planned for M4.
 Duplicate prevention applies within a live run; reusing a plan in a later run executes it again.
 There are no restart or exactly-once guarantees.
 
