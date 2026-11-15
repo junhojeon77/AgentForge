@@ -1,11 +1,13 @@
 """python -m agentforge: the five-worker mock demo, `setup` for the persona folder, `claude` to
 run one read-only task with Claude Code, `plan` to turn a request into a task plan with the
-lead agent, and `clean` to delete a finished run's worktrees."""
+lead agent, `clean` to delete a finished run's worktrees, and `serve` to start the local
+API."""
 
 import argparse
 import asyncio
 import json
 import os
+import shlex
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -76,7 +78,7 @@ async def run_claude(plan: RunPlan, command: Sequence[str]) -> RunReport:
 
 def cli(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agentforge", description=__doc__)
-    modes = parser.add_subparsers(dest="mode", metavar="{setup,claude,plan,clean}")
+    modes = parser.add_subparsers(dest="mode", metavar="{setup,claude,plan,clean,serve}")
     modes.add_parser("setup", help="create the agent persona folder")
     claude = modes.add_parser(
         "claude", help="run one read-only task with Claude Code (billed to your Claude login)"
@@ -115,6 +117,28 @@ def cli(argv: Sequence[str] | None = None) -> int:
     clean.add_argument("run_id", help="the id of the run")
     clean.add_argument("--repo", required=True, help="the repository the worktrees belong to")
     clean.add_argument("--root", required=True, help="the folder given to WorktreeExecutor")
+    serving = modes.add_parser(
+        "serve", help="start the local API on 127.0.0.1; work starts only when a person approves"
+    )
+    serving.add_argument("--port", type=int, default=8765, help="default 8765")
+    serving.add_argument("--worktrees", required=True, help="the folder for task worktrees")
+    serving.add_argument(
+        "--check",
+        action="append",
+        default=[],
+        metavar="NAME=COMMAND",
+        help='a check tasks can be given, e.g. unit="python -m pytest"; repeatable',
+    )
+    serving.add_argument(
+        "--store", help="the run database (default: %%APPDATA%%\\AgentForge\\runs.db)"
+    )
+    serving.add_argument(
+        "--command",
+        nargs="+",
+        default=(os.environ.get("AGENTFORGE_CLAUDE", "claude"),),
+        metavar="PROGRAM",
+        help="path to claude.exe and any arguments (default: $AGENTFORGE_CLAUDE, else claude)",
+    )
     args = parser.parse_args(argv)
     if args.mode == "setup":
         print(f"Agent personas are in {setup(default_folder())}")
@@ -122,6 +146,8 @@ def cli(argv: Sequence[str] | None = None) -> int:
     if args.mode is None:
         asyncio.run(main())
         return 0
+    if args.mode == "serve":
+        return _serve(serving, args)
     if args.mode == "plan":
         return _plan(planning, args)
     if args.mode == "clean":
@@ -180,6 +206,31 @@ def _plan(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     except ValueError as error:
         parser.error(str(error))
     print(result.model_dump_json(indent=2))
+    return 0
+
+
+def _serve(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    # Imported here, so the other commands never load the web stack.
+    from agentforge import api
+    from agentforge.store import default_path
+
+    checks = {}
+    for item in args.check:
+        name, _, command = item.partition("=")
+        if not name or not command.strip():
+            parser.error(f"--check needs NAME=COMMAND, got {item!r}")
+        # posix=False keeps Windows backslashes; the quotes around a part are removed.
+        checks[name] = tuple(part.strip('"') for part in shlex.split(command, posix=False))
+    token = api.write_token(api.default_token_path())
+    settings = api.ApiSettings(
+        store_path=Path(args.store) if args.store else default_path(),
+        token=token.read_text(encoding="utf-8"),
+        worktrees=Path(args.worktrees).resolve(),
+        checks=checks,
+        claude_command=tuple(args.command),
+    )
+    print(f"AgentForge API on http://127.0.0.1:{args.port}; token in {token}", file=sys.stderr)
+    api.serve(settings, args.port)
     return 0
 
 
