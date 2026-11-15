@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agentforge"
 version = "0.1.0"
-description = "AgentForge domain models, task scheduler and saved runs"
+description = "AgentForge: task scheduler, Claude Code workers, saved runs and a local API"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2,<3",
@@ -13,10 +13,12 @@ dependencies = [
     "alembic>=1.20,<2",
     "langgraph>=1.2,<2",
     "langchain-core>=1.8,<2",
+    "fastapi>=0.163,<1",
+    "uvicorn>=0.54,<1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "ruff>=0.9,<1"]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "ruff>=0.9,<1", "httpx>=0.28,<1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
