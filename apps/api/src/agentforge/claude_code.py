@@ -1,6 +1,7 @@
 """Claude Code worker: runs `claude -p` and returns its structured WorkerResult.
 
-Read-only unless the task allows "edit"; it never gets a tool that runs commands.
+Read-only unless the task allows "edit". The only commands it can ever run are its own
+task's check commands, and only when the task also allows "check".
 
 Flags and the stream-json event shapes were checked against Claude Code CLI 2.1.323.
 """
@@ -10,10 +11,11 @@ import contextlib
 import json
 import logging
 import pathlib
+import shlex
 import shutil
 import uuid
 from asyncio.subprocess import PIPE
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from agentforge.domain import Assignment, TaskSpec, WorkerResult
 
@@ -36,6 +38,33 @@ def _can_edit(task: TaskSpec) -> bool:
     return "edit" in task.allowed_operations
 
 
+def _check_commands(task: TaskSpec, checks: Mapping[str, tuple[str, ...]]) -> dict[str, str]:
+    """The command line of each check this task's worker may run; empty unless allowed."""
+    if "check" not in task.allowed_operations:
+        return {}
+    if not _can_edit(task):
+        raise ValueError(f'task {task.id}: "check" needs "edit" too')
+    commands = {}
+    for constraint in task.execution_constraints:
+        if not constraint.startswith("check:"):
+            continue
+        name = constraint.removeprefix("check:")
+        if name not in checks:
+            raise ValueError(
+                f"task {task.id}: no command for check {name!r}; pass checks= to "
+                "ClaudeCodeExecutor, the same mapping CommandValidator gets"
+            )
+        command = shlex.join(checks[name])
+        # The CLI reads these characters as rule syntax: a '*' would widen the rule into a
+        # wildcard and let the worker run other commands.
+        if any(char in command for char in "*()"):
+            raise ValueError(
+                f"check {name!r} cannot be given to a worker: its command contains '*', '(' or ')'"
+            )
+        commands[name] = command
+    return commands
+
+
 _REPORT = (
     "Report through the structured output. List in passed_checks only checks you actually "
     "ran, and in satisfied_criteria only criteria you verified."
@@ -48,8 +77,19 @@ _RESUME_PROMPT = (
 _NO_SESSION = "No conversation found with session ID"
 
 
-def _prompt(task: TaskSpec, previous_failure: str = "", interrupted: bool = False) -> str:
-    if _can_edit(task):
+def _prompt(
+    task: TaskSpec,
+    previous_failure: str = "",
+    interrupted: bool = False,
+    commands: Sequence[str] = (),
+) -> str:
+    if commands:
+        lines = [
+            "You are an AgentForge worker. You can edit files in the current folder and run "
+            "only the check commands listed below; AgentForge runs the checks again after you "
+            "finish."
+        ]
+    elif _can_edit(task):
         lines = [
             "You are an AgentForge worker. You can edit files in the current folder, but you "
             "cannot run commands; AgentForge runs the checks after you finish."
@@ -71,6 +111,12 @@ def _prompt(task: TaskSpec, previous_failure: str = "", interrupted: bool = Fals
         if value:
             lines.append(f"{heading}:")
             lines += [f"- {item}" for item in value] if isinstance(value, tuple) else [value]
+    if commands:
+        lines.append(
+            "Check commands you may run with the Bash tool, exactly as written. Nothing else "
+            "will run:"
+        )
+        lines += [f"- {command}" for command in commands]
     if previous_failure:
         lines += [
             "Previous attempt failed. You are starting again from a clean copy; none of its "
@@ -95,8 +141,11 @@ class ClaudeCodeExecutor:
         command: Sequence[str] = ("claude",),
         max_budget_usd: float = 1.0,
         on_event: Callable[[str, dict], None] | None = None,
+        checks: Mapping[str, Sequence[str]] | None = None,
     ):
         self.command = tuple(command)
+        # {name: argv}, the same mapping CommandValidator gets; used only by "check" tasks.
+        self.checks = {name: tuple(argv) for name, argv in (checks or {}).items()}
         self.max_budget_usd = max_budget_usd
         self.on_event = on_event
 
@@ -115,12 +164,15 @@ class ClaudeCodeExecutor:
                 f"Claude Code launcher {program!r} is a batch file, which cannot take multi-line "
                 "arguments. Pass command=(<path to claude.exe>,) instead."
             )
+        commands = _check_commands(task, self.checks)
         workspace = task.workspace_reference
         # A single local stat before a long-running process; not worth a thread hop.
         if workspace is None or not pathlib.Path(workspace).is_dir():  # noqa: ASYNC240
             raise ValueError(f"task {task.id} needs an existing workspace folder")
         session_id = assignment.session_id or str(uuid.uuid4())
         tools = EDIT_TOOLS if _can_edit(task) else READ_ONLY_TOOLS
+        if commands:
+            tools += ",Bash"
         args = [
             *self.command[1:],
             "-p",
@@ -132,7 +184,13 @@ class ClaudeCodeExecutor:
             "--restricted", "--strict-mcp-config",
             "--max-budget-usd", str(self.max_budget_usd),
         ]  # fmt: skip
-        if _can_edit(task):
+        if commands:
+            # dontAsk refuses every tool use without a rule. acceptEdits would also approve file
+            # commands such as touch; live checks on 2.1.323 found that only commands the CLI
+            # counts as read-only inside the folder still run without a rule.
+            rules = [f"Bash({command})" for command in commands.values()]
+            args += ["--permission-mode", "dontAsk", "--allowedTools", "Edit", "Write", *rules]
+        elif _can_edit(task):
             # Edits would otherwise prompt, and "--permission-prompts none" denies every prompt.
             args += ["--permission-mode", "acceptEdits"]
         if worker.model is not None:
@@ -140,18 +198,22 @@ class ClaudeCodeExecutor:
         if worker.persona:
             args += ["--append-system-prompt", worker.persona]
         what = f"task {task.id} attempt {assignment.attempt_number} session {session_id}"
+        # Check names only: a command line can hold anything.
+        limits = tools + (f"; checks {','.join(commands)}" if commands else "")
         resume = assignment.resume
         while True:
             # Never log the prompt or persona: they can hold secrets.
             logger.debug(
                 "claude %s: %s in %s (tools %s)",
-                "resumed" if resume else "started", what, workspace, tools,
+                "resumed" if resume else "started", what, workspace, limits,
             )  # fmt: skip
             if resume:
                 session, prompt = "--resume", _RESUME_PROMPT
             else:
                 session = "--session-id"
-                prompt = _prompt(task, assignment.previous_failure, assignment.resume)
+                prompt = _prompt(
+                    task, assignment.previous_failure, assignment.resume, tuple(commands.values())
+                )
             code, stderr, result = await self._run(
                 program, [*args, session, session_id], prompt, task
             )

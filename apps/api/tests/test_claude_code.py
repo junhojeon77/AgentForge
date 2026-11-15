@@ -139,6 +139,65 @@ async def test_edit_task_gets_edit_tools_but_no_commands(workspace):
     assert "cannot edit files" not in call["stdin"]
 
 
+def checking_task(workspace, **changes):
+    values = {
+        "allowed_operations": ("edit", "check"),
+        "execution_constraints": ("check:unit", "keep it short", "check:lint"),
+    }
+    return TaskSpec.model_validate(task(workspace).model_dump() | values | changes)
+
+
+CHECKS = {"unit": ("python", "-m", "pytest"), "lint": ("ruff", "check", "src dir")}
+
+
+async def test_check_task_may_run_exactly_its_own_checks(workspace, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    claude = executor(checks=CHECKS)
+    await claude.execute(
+        Assignment(task=checking_task(workspace), worker=AgentConfig(id="w", role="backend"))
+    )
+
+    call = fake_call(workspace)
+    argv = call["argv"]
+    assert flag(argv, "--tools") == "Read,Glob,Grep,Edit,Write,Bash"
+    # dontAsk refuses every command without a rule; acceptEdits would approve file commands too.
+    assert flag(argv, "--permission-mode") == "dontAsk"
+    start = argv.index("--allowedTools") + 1
+    assert argv[start : start + 4] == [
+        "Edit", "Write", "Bash(python -m pytest)", "Bash(ruff check 'src dir')"
+    ]  # fmt: skip
+    assert argv[start + 4].startswith("--")
+    assert flag(argv, "--permission-prompts") == "none"
+    assert {"--restricted", "--strict-mcp-config"} <= set(argv)
+    assert "python -m pytest" in call["stdin"] and "ruff check 'src dir'" in call["stdin"]
+    assert "cannot run commands" not in call["stdin"]
+    started = [m for m in caplog.messages if m.startswith("claude started")]
+    assert started and started[0].endswith(
+        "(tools Read,Glob,Grep,Edit,Write,Bash; checks unit,lint)"
+    )
+    # Check names only: a command line can hold anything.
+    assert "-m pytest" not in caplog.text and "src dir" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "changes, checks, error",
+    [
+        ({"allowed_operations": ("check",)}, CHECKS, '"check" needs "edit"'),
+        ({}, {"unit": CHECKS["unit"]}, "no command for check 'lint'"),
+        ({}, {}, "no command for check 'unit'"),
+        ({}, CHECKS | {"unit": ("pytest", "tests/*")}, "cannot be given to a worker"),
+    ],
+)
+async def test_check_task_that_cannot_be_limited_never_starts(workspace, changes, checks, error):
+    with pytest.raises(ValueError, match=error):
+        await executor(checks=checks).execute(
+            Assignment(
+                task=checking_task(workspace, **changes), worker=AgentConfig(id="w", role="b")
+            )
+        )
+    assert not (workspace.parent / "call.json").exists()
+
+
 async def test_retry_prompt_carries_the_previous_failure_as_data(workspace):
     retry = Assignment(
         task=task(workspace),
