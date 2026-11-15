@@ -41,6 +41,43 @@ class ResultValidator(Protocol):
     async def validate(self, task: TaskSpec, result: WorkerResult) -> ValidationReport: ...
 
 
+def validate_plan(plan: RunPlan, roles: Iterable[str]) -> tuple[RunPlan, dict[str, list[str]]]:
+    """Check a whole plan before anything runs; returns it and each task's dependents.
+
+    Raises ValueError naming the first problem. The scheduler and the lead agent both use it.
+    """
+    plan = RunPlan.model_validate(plan)
+    tasks = {task.id: task for task in plan.tasks}
+    if len(tasks) != len(plan.tasks):
+        raise ValueError("duplicate task ID")
+    roles = set(roles)
+    for task in tasks.values():
+        if task.run_id != plan.id:
+            raise ValueError(f"inconsistent run ID: {task.id}")
+        if task.role not in roles:
+            raise ValueError(f"no worker registered for role: {task.role}")
+        if any(dependency not in tasks for dependency in task.dependencies):
+            raise ValueError(f"missing dependency: {task.id}")
+    # Kahn's algorithm avoids recursion limits on large valid chains.
+    remaining = {key: set(task.dependencies) for key, task in tasks.items()}
+    ready = [key for key, dependencies in remaining.items() if not dependencies]
+    dependents: dict[str, list[str]] = {key: [] for key in tasks}
+    for key, dependencies in remaining.items():
+        for dependency in dependencies:
+            dependents[dependency].append(key)
+    visited = 0
+    while ready:
+        key = ready.pop()
+        visited += 1
+        for dependent in dependents[key]:
+            remaining[dependent].remove(key)
+            if not remaining[dependent]:
+                ready.append(dependent)
+    if visited != len(tasks):
+        raise ValueError("cyclic task dependencies")
+    return plan, dependents
+
+
 class Scheduler:
     """Run fixed DAGs sequentially; use all public methods on the same event loop.
 
@@ -96,36 +133,7 @@ class Scheduler:
         )
 
     def _validate_plan(self, plan: RunPlan) -> tuple[RunPlan, dict[str, list[str]]]:
-        plan = RunPlan.model_validate(plan)
-        tasks = {task.id: task for task in plan.tasks}
-        if len(tasks) != len(plan.tasks):
-            raise ValueError("duplicate task ID")
-        roles = {worker.agent.role for worker in self._workers.values()}
-        for task in tasks.values():
-            if task.run_id != plan.id:
-                raise ValueError(f"inconsistent run ID: {task.id}")
-            if task.role not in roles:
-                raise ValueError(f"no worker registered for role: {task.role}")
-            if any(dependency not in tasks for dependency in task.dependencies):
-                raise ValueError(f"missing dependency: {task.id}")
-        # Kahn's algorithm avoids recursion limits on large valid chains.
-        remaining = {key: set(task.dependencies) for key, task in tasks.items()}
-        ready = [key for key, dependencies in remaining.items() if not dependencies]
-        dependents: dict[str, list[str]] = {key: [] for key in tasks}
-        for key, dependencies in remaining.items():
-            for dependency in dependencies:
-                dependents[dependency].append(key)
-        visited = 0
-        while ready:
-            key = ready.pop()
-            visited += 1
-            for dependent in dependents[key]:
-                remaining[dependent].remove(key)
-                if not remaining[dependent]:
-                    ready.append(dependent)
-        if visited != len(tasks):
-            raise ValueError("cyclic task dependencies")
-        return plan, dependents
+        return validate_plan(plan, (worker.agent.role for worker in self._workers.values()))
 
     async def run(self, plan: RunPlan) -> RunReport:
         if self._running or self._active:

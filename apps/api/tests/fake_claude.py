@@ -1,7 +1,8 @@
 """Stand-in for `claude -p --output-format stream-json`, replaying a recorded live run.
 
 FAKE_CLAUDE_MODE picks the behavior; FAKE_CLAUDE_LOG receives the latest call's argv, cwd, stdin
-and pid as JSON, and FAKE_CLAUDE_LOG + ".all" collects every call, one JSON line each.
+and pid as JSON, and FAKE_CLAUDE_LOG + ".all" collects every call, one JSON line each. In "script"
+mode the Nth call replies with the Nth structured output from the JSON list in FAKE_CLAUDE_SCRIPT.
 """
 
 import json
@@ -47,6 +48,13 @@ elif mode == "crash":
     print(events[0], flush=True)
     print("fatal: not logged in", file=sys.stderr, flush=True)
     sys.exit(1)
+elif mode == "script":
+    script = pathlib.Path(os.environ["FAKE_CLAUDE_SCRIPT"])
+    turn = len(pathlib.Path(os.environ["FAKE_CLAUDE_LOG"] + ".all").read_text().splitlines())
+    output = json.loads(script.read_text(encoding="utf-8"))[turn - 1]
+    print(events[0], flush=True)
+    reply = {"type": "result", "subtype": "success", "is_error": False}
+    print(json.dumps(reply | {"session_id": session_id, "structured_output": output}), flush=True)
 elif mode == "hang":
     print(events[0], flush=True)
     time.sleep(60)

@@ -1,16 +1,19 @@
 """python -m agentforge: the five-worker mock demo, `setup` for the persona folder, `claude` to
-run one read-only task with Claude Code, and `clean` to delete a finished run's worktrees."""
+run one read-only task with Claude Code, `plan` to turn a request into a task plan with the
+lead agent, and `clean` to delete a finished run's worktrees."""
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from agentforge import worktrees
-from agentforge.claude_code import ClaudeCodeExecutor
+from agentforge.claude_code import ClaudeCodeExecutor, ClaudeCodeRunner
 from agentforge.domain import RunPlan, RunReport, TaskSpec, WorkerResult
+from agentforge.lead import Planner, PlanRejected, PlanRequest
 from agentforge.mocks import DEFAULT_ROLES, MockExecutor, MockValidator, register_default_workers
 from agentforge.orchestration import Scheduler
 from agentforge.personas import default_agents, default_folder, load_agents, setup
@@ -73,7 +76,7 @@ async def run_claude(plan: RunPlan, command: Sequence[str]) -> RunReport:
 
 def cli(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agentforge", description=__doc__)
-    modes = parser.add_subparsers(dest="mode", metavar="{setup,claude,clean}")
+    modes = parser.add_subparsers(dest="mode", metavar="{setup,claude,plan,clean}")
     modes.add_parser("setup", help="create the agent persona folder")
     claude = modes.add_parser(
         "claude", help="run one read-only task with Claude Code (billed to your Claude login)"
@@ -83,6 +86,23 @@ def cli(argv: Sequence[str] | None = None) -> int:
     claude.add_argument("--role", default="qa", help="which agent's role runs it (default: qa)")
     claude.add_argument("--timeout", type=float, help="seconds before the worker is stopped")
     claude.add_argument(
+        "--command",
+        nargs="+",
+        default=(os.environ.get("AGENTFORGE_CLAUDE", "claude"),),
+        metavar="PROGRAM",
+        help="path to claude.exe and any arguments (default: $AGENTFORGE_CLAUDE, else claude)",
+    )
+    planning = modes.add_parser(
+        "plan",
+        help="turn a request into a task plan with the lead agent (billed); does not run it",
+    )
+    planning.add_argument("request", help="what you want done, in plain English")
+    planning.add_argument("--workspace", default=".", help="the repository to plan for")
+    planning.add_argument("--run-id", default="plan", help="the id the plan gets")
+    planning.add_argument(
+        "--max-revisions", type=int, default=2, help="revisions before giving up (default 2)"
+    )
+    planning.add_argument(
         "--command",
         nargs="+",
         default=(os.environ.get("AGENTFORGE_CLAUDE", "claude"),),
@@ -102,6 +122,8 @@ def cli(argv: Sequence[str] | None = None) -> int:
     if args.mode is None:
         asyncio.run(main())
         return 0
+    if args.mode == "plan":
+        return _plan(planning, args)
     if args.mode == "clean":
         try:
             removed = asyncio.run(worktrees.remove_run(args.repo, args.root, args.run_id))
@@ -134,6 +156,31 @@ def cli(argv: Sequence[str] | None = None) -> int:
         claude.error(str(error))
     print(report.model_dump_json(indent=2))
     return 0 if report.successful else 1
+
+
+def _plan(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    workspace = Path(args.workspace).resolve()
+    if not workspace.is_dir():
+        parser.error(f"workspace is not a folder: {workspace}")
+    roles = {agent.role for agent in load_agents(default_folder()) or default_agents()}
+    try:
+        lead = Planner(
+            ClaudeCodeRunner(command=args.command),
+            roles=roles,
+            workspace=str(workspace),
+            max_revisions=args.max_revisions,
+        )
+        request = PlanRequest(request=args.request, run_id=args.run_id)
+        print("AgentForge: planning is billed to your Claude Code login.", file=sys.stderr)
+        result = asyncio.run(lead.ainvoke(request))
+    except PlanRejected as rejected:
+        print(f"AgentForge: {rejected}", file=sys.stderr)
+        print(json.dumps([r.model_dump(mode="json") for r in rejected.rounds], indent=2))
+        return 1
+    except ValueError as error:
+        parser.error(str(error))
+    print(result.model_dump_json(indent=2))
+    return 0
 
 
 if __name__ == "__main__":
