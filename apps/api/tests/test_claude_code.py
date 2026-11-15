@@ -8,9 +8,10 @@ import sys
 import uuid
 
 import pytest
+from langchain_core.runnables import Runnable, RunnableLambda
 
 from agentforge.__main__ import cli
-from agentforge.claude_code import ClaudeCodeExecutor
+from agentforge.claude_code import ClaudeCall, ClaudeCodeExecutor, ClaudeCodeRunner
 from agentforge.domain import (
     AgentConfig,
     Assignment,
@@ -137,6 +138,44 @@ async def test_edit_task_gets_edit_tools_but_no_commands(workspace):
     assert {"--restricted", "--strict-mcp-config"} <= set(argv)
     assert "can edit files" in call["stdin"] and "cannot run commands" in call["stdin"]
     assert "cannot edit files" not in call["stdin"]
+
+
+async def test_executor_is_a_langchain_runnable(workspace):
+    claude = executor()
+    assert isinstance(claude, Runnable)
+    assignment = Assignment(task=task(workspace), worker=AgentConfig(id="w", role="backend"))
+
+    result = await claude.ainvoke(assignment)
+
+    assert result.success and result.message == "pineapple"
+    assert result.session_id == flag(fake_call(workspace)["argv"], "--session-id")
+    with pytest.raises(NotImplementedError, match="async"):
+        claude.invoke(assignment)
+
+
+async def test_runner_composes_with_langchain_and_returns_the_result_event(workspace):
+    def call(question):
+        return ClaudeCall(
+            key="lead",
+            name="lead r1",
+            label="lead r1 round 1",
+            folder=str(workspace),
+            prompt=question,
+            schema='{"type": "object"}',
+            tools="Read,Glob,Grep",
+            session_id=str(uuid.uuid4()),
+        )
+
+    chain = RunnableLambda(call) | ClaudeCodeRunner(command=(sys.executable, str(FAKE_CLAUDE)))
+    result = await chain.ainvoke("Which file holds the secret word?")
+
+    assert result["subtype"] == "success"
+    assert result["structured_output"]["message"] == "pineapple"
+    sent = fake_call(workspace)
+    assert sent["stdin"] == "Which file holds the secret word?"
+    assert flag(sent["argv"], "--tools") == "Read,Glob,Grep"
+    assert flag(sent["argv"], "--json-schema") == '{"type": "object"}'
+    assert pathlib.Path(sent["cwd"]).samefile(workspace)  # noqa: ASYNC240
 
 
 def checking_task(workspace, **changes):

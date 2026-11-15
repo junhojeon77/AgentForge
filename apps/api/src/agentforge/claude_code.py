@@ -3,6 +3,9 @@
 Read-only unless the task allows "edit". The only commands it can ever run are its own
 task's check commands, and only when the task also allows "check".
 
+`ClaudeCodeRunner` runs one CLI session and is a LangChain Runnable, so it composes with
+other Runnables; `ClaudeCodeExecutor` builds a worker's call and runs it through it.
+
 Flags and the stream-json event shapes were checked against Claude Code CLI 2.1.323.
 """
 
@@ -16,6 +19,10 @@ import shutil
 import uuid
 from asyncio.subprocess import PIPE
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import Runnable, RunnableConfig
 
 from agentforge.domain import Assignment, TaskSpec, WorkerResult
 
@@ -75,6 +82,8 @@ _RESUME_PROMPT = (
 )
 # What CLI 2.1.323 prints on stderr when asked to resume a session it never saved (seen live).
 _NO_SESSION = "No conversation found with session ID"
+# f-string format inserts values as they are, so braces in a task's text stay literal.
+_WORKER_PROMPT = PromptTemplate.from_template("{intro}\n{details}{report}")
 
 
 def _prompt(
@@ -84,21 +93,22 @@ def _prompt(
     commands: Sequence[str] = (),
 ) -> str:
     if commands:
-        lines = [
+        intro = (
             "You are an AgentForge worker. You can edit files in the current folder and run "
             "only the check commands listed below; AgentForge runs the checks again after you "
             "finish."
-        ]
+        )
     elif _can_edit(task):
-        lines = [
+        intro = (
             "You are an AgentForge worker. You can edit files in the current folder, but you "
             "cannot run commands; AgentForge runs the checks after you finish."
-        ]
+        )
     else:
-        lines = [
+        intro = (
             "You are a read-only AgentForge worker. You can read, search and list files in the "
             "current folder, but you cannot edit files or run commands."
-        ]
+        )
+    lines = []
     sections = (
         ("Task", task.title),
         ("Description", task.description),
@@ -128,12 +138,37 @@ def _prompt(
             "An earlier run of this attempt was interrupted in this folder. Files it edited may "
             "already be here; check them before you continue."
         )
-    lines.append(_REPORT)
-    return "\n".join(lines)
+    details = "".join(line + "\n" for line in lines)
+    return _WORKER_PROMPT.format(intro=intro, details=details, report=_REPORT)
 
 
-class ClaudeCodeExecutor:
-    """WorkerExecutor backed by the Claude Code CLI in read-only print mode."""
+@dataclass(frozen=True)
+class ClaudeCall:
+    """One `claude -p` session: what to ask, where, and with which limits."""
+
+    key: str  # passed to on_event with every event, e.g. the task id
+    name: str  # names the caller in warnings, e.g. "task a"
+    label: str  # names this call in log lines, e.g. "task a attempt 1"
+    folder: str
+    prompt: str
+    schema: str  # the JSON schema the reply must match
+    tools: str
+    session_id: str
+    effort: str = "medium"
+    model: str | None = None
+    persona: str = ""
+    extra_args: tuple[str, ...] = ()  # e.g. a permission mode and allow rules
+    log_limits: str = ""  # what the log says about the limits; defaults to the tools
+    resume: bool = False  # continue session_id; falls back to a fresh session if none was saved
+    resume_prompt: str = ""
+
+
+class ClaudeCodeRunner(Runnable[ClaudeCall, dict]):
+    """Runs one Claude Code CLI session and returns its `result` event, as a LangChain Runnable.
+
+    Every call is limited the same way: `--restricted`, `--strict-mcp-config`, no permission
+    prompts and a spending cap. The caller picks the tools and anything extra.
+    """
 
     def __init__(
         self,
@@ -141,16 +176,18 @@ class ClaudeCodeExecutor:
         command: Sequence[str] = ("claude",),
         max_budget_usd: float = 1.0,
         on_event: Callable[[str, dict], None] | None = None,
-        checks: Mapping[str, Sequence[str]] | None = None,
     ):
         self.command = tuple(command)
-        # {name: argv}, the same mapping CommandValidator gets; used only by "check" tasks.
-        self.checks = {name: tuple(argv) for name, argv in (checks or {}).items()}
         self.max_budget_usd = max_budget_usd
         self.on_event = on_event
 
-    async def execute(self, assignment: Assignment) -> WorkerResult:
-        task, worker = assignment.task, assignment.worker
+    def invoke(self, input: ClaudeCall, config: RunnableConfig | None = None, **kwargs) -> dict:
+        raise NotImplementedError("ClaudeCodeRunner is async only: use ainvoke")
+
+    async def ainvoke(
+        self, input: ClaudeCall, config: RunnableConfig | None = None, **kwargs
+    ) -> dict:
+        call = input
         program = shutil.which(self.command[0])
         if program is None:
             raise FileNotFoundError(
@@ -164,58 +201,37 @@ class ClaudeCodeExecutor:
                 f"Claude Code launcher {program!r} is a batch file, which cannot take multi-line "
                 "arguments. Pass command=(<path to claude.exe>,) instead."
             )
-        commands = _check_commands(task, self.checks)
-        workspace = task.workspace_reference
-        # A single local stat before a long-running process; not worth a thread hop.
-        if workspace is None or not pathlib.Path(workspace).is_dir():  # noqa: ASYNC240
-            raise ValueError(f"task {task.id} needs an existing workspace folder")
-        session_id = assignment.session_id or str(uuid.uuid4())
-        tools = EDIT_TOOLS if _can_edit(task) else READ_ONLY_TOOLS
-        if commands:
-            tools += ",Bash"
         args = [
             *self.command[1:],
             "-p",
             "--output-format", "stream-json", "--verbose",
-            "--json-schema", _result_schema(),
-            "--effort", worker.reasoning,
-            "--tools", tools,
+            "--json-schema", call.schema,
+            "--effort", call.effort,
+            "--tools", call.tools,
             "--permission-prompts", "none",
             "--restricted", "--strict-mcp-config",
             "--max-budget-usd", str(self.max_budget_usd),
+            *call.extra_args,
         ]  # fmt: skip
-        if commands:
-            # dontAsk refuses every tool use without a rule. acceptEdits would also approve file
-            # commands such as touch; live checks on 2.1.323 found that only commands the CLI
-            # counts as read-only inside the folder still run without a rule.
-            rules = [f"Bash({command})" for command in commands.values()]
-            args += ["--permission-mode", "dontAsk", "--allowedTools", "Edit", "Write", *rules]
-        elif _can_edit(task):
-            # Edits would otherwise prompt, and "--permission-prompts none" denies every prompt.
-            args += ["--permission-mode", "acceptEdits"]
-        if worker.model is not None:
-            args += ["--model", worker.model]
-        if worker.persona:
-            args += ["--append-system-prompt", worker.persona]
-        what = f"task {task.id} attempt {assignment.attempt_number} session {session_id}"
-        # Check names only: a command line can hold anything.
-        limits = tools + (f"; checks {','.join(commands)}" if commands else "")
-        resume = assignment.resume
+        if call.model is not None:
+            args += ["--model", call.model]
+        if call.persona:
+            args += ["--append-system-prompt", call.persona]
+        what = f"{call.label} session {call.session_id}"
+        resume = call.resume
         while True:
             # Never log the prompt or persona: they can hold secrets.
             logger.debug(
                 "claude %s: %s in %s (tools %s)",
-                "resumed" if resume else "started", what, workspace, limits,
+                "resumed" if resume else "started", what, call.folder,
+                call.log_limits or call.tools,
             )  # fmt: skip
             if resume:
-                session, prompt = "--resume", _RESUME_PROMPT
+                session, prompt = "--resume", call.resume_prompt
             else:
-                session = "--session-id"
-                prompt = _prompt(
-                    task, assignment.previous_failure, assignment.resume, tuple(commands.values())
-                )
+                session, prompt = "--session-id", call.prompt
             code, stderr, result = await self._run(
-                program, [*args, session, session_id], prompt, task
+                program, [*args, session, call.session_id], prompt, call
             )
             logger.debug(
                 "claude finished: %s exit %s result %s",
@@ -227,29 +243,22 @@ class ClaudeCodeExecutor:
                 break
             # The pause came before Claude saved anything, so there is nothing to continue.
             logger.warning(
-                "task %s attempt %d: no saved session %s to resume; "
-                "starting a fresh one in the same folder",
-                task.id, assignment.attempt_number, session_id,
+                "%s: no saved session %s to resume; starting a fresh one in the same folder",
+                call.label, call.session_id,
             )  # fmt: skip
             resume = False
         if result is None:
             raise RuntimeError(f"claude exited {code} without a result: {stderr[-2000:]}")
-        output = result.get("structured_output")
-        if result.get("is_error") or result.get("subtype") != "success" or output is None:
-            reason = result.get("result") or "no structured output"
-            return WorkerResult(
-                success=False, message=f"{result.get('subtype')}: {reason}", session_id=session_id
-            )
-        return WorkerResult.model_validate({**output, "session_id": session_id})
+        return result
 
     async def _run(
-        self, program: str, args: list[str], prompt: str, task: TaskSpec
+        self, program: str, args: list[str], prompt: str, call: ClaudeCall
     ) -> tuple[int, str, dict | None]:
         """One CLI process: its exit code, its stderr and its `result` event, if any."""
         proc = await asyncio.create_subprocess_exec(
             program,
             *args,
-            cwd=task.workspace_reference,
+            cwd=call.folder,
             stdin=PIPE,
             stdout=PIPE,
             stderr=PIPE,
@@ -262,7 +271,7 @@ class ClaudeCodeExecutor:
                 await proc.stdin.drain()
             proc.stdin.close()
             stderr, result = await asyncio.gather(
-                proc.stderr.read(), self._read_events(task.id, proc.stdout)
+                proc.stderr.read(), self._read_events(call, proc.stdout)
             )
             code = await proc.wait()
         finally:
@@ -271,7 +280,7 @@ class ClaudeCodeExecutor:
                 await proc.wait()
         return code, stderr.decode("utf-8", errors="replace").strip(), result
 
-    async def _read_events(self, task_id: str, stdout: asyncio.StreamReader) -> dict | None:
+    async def _read_events(self, call: ClaudeCall, stdout: asyncio.StreamReader) -> dict | None:
         result = None
         async for line in stdout:
             if not line.strip():
@@ -283,12 +292,94 @@ class ClaudeCodeExecutor:
             if not isinstance(event, dict):
                 # The length only: the line can hold anything.
                 logger.warning(
-                    "task %s: skipped an output line of %d bytes that is not a JSON event",
-                    task_id, len(line),
+                    "%s: skipped an output line of %d bytes that is not a JSON event",
+                    call.name, len(line),
                 )  # fmt: skip
                 continue
             if self.on_event is not None:
-                self.on_event(task_id, event)
+                self.on_event(call.key, event)
             if event.get("type") == "result":
                 result = event
         return result
+
+
+class ClaudeCodeExecutor(Runnable[Assignment, WorkerResult]):
+    """WorkerExecutor backed by the Claude Code CLI, read-only unless the task allows more.
+
+    Also a LangChain Runnable: `await executor.ainvoke(assignment)` equals `execute`.
+    """
+
+    def __init__(
+        self,
+        *,
+        command: Sequence[str] = ("claude",),
+        max_budget_usd: float = 1.0,
+        on_event: Callable[[str, dict], None] | None = None,
+        checks: Mapping[str, Sequence[str]] | None = None,
+    ):
+        self.runner = ClaudeCodeRunner(
+            command=command, max_budget_usd=max_budget_usd, on_event=on_event
+        )
+        # {name: argv}, the same mapping CommandValidator gets; used only by "check" tasks.
+        self.checks = {name: tuple(argv) for name, argv in (checks or {}).items()}
+
+    def invoke(
+        self, input: Assignment, config: RunnableConfig | None = None, **kwargs
+    ) -> WorkerResult:
+        raise NotImplementedError("ClaudeCodeExecutor is async only: use ainvoke or execute")
+
+    async def ainvoke(
+        self, input: Assignment, config: RunnableConfig | None = None, **kwargs
+    ) -> WorkerResult:
+        return await self.execute(input)
+
+    async def execute(self, assignment: Assignment) -> WorkerResult:
+        task, worker = assignment.task, assignment.worker
+        commands = _check_commands(task, self.checks)
+        workspace = task.workspace_reference
+        # A single local stat before a long-running process; not worth a thread hop.
+        if workspace is None or not pathlib.Path(workspace).is_dir():  # noqa: ASYNC240
+            raise ValueError(f"task {task.id} needs an existing workspace folder")
+        session_id = assignment.session_id or str(uuid.uuid4())
+        tools = EDIT_TOOLS if _can_edit(task) else READ_ONLY_TOOLS
+        if commands:
+            tools += ",Bash"
+        extra: tuple[str, ...] = ()
+        if commands:
+            # dontAsk refuses every tool use without a rule. acceptEdits would also approve file
+            # commands such as touch; live checks on 2.1.323 found that only commands the CLI
+            # counts as read-only inside the folder still run without a rule.
+            rules = [f"Bash({command})" for command in commands.values()]
+            extra = ("--permission-mode", "dontAsk", "--allowedTools", "Edit", "Write", *rules)
+        elif _can_edit(task):
+            # Edits would otherwise prompt, and "--permission-prompts none" denies every prompt.
+            extra = ("--permission-mode", "acceptEdits")
+        result = await self.runner.ainvoke(
+            ClaudeCall(
+                key=task.id,
+                name=f"task {task.id}",
+                label=f"task {task.id} attempt {assignment.attempt_number}",
+                folder=workspace,
+                prompt=_prompt(
+                    task, assignment.previous_failure, assignment.resume, tuple(commands.values())
+                ),
+                schema=_result_schema(),
+                tools=tools,
+                session_id=session_id,
+                effort=worker.reasoning,
+                model=worker.model,
+                persona=worker.persona,
+                extra_args=extra,
+                # Check names only: a command line can hold anything.
+                log_limits=tools + (f"; checks {','.join(commands)}" if commands else ""),
+                resume=assignment.resume,
+                resume_prompt=_RESUME_PROMPT,
+            )
+        )
+        output = result.get("structured_output")
+        if result.get("is_error") or result.get("subtype") != "success" or output is None:
+            reason = result.get("result") or "no structured output"
+            return WorkerResult(
+                success=False, message=f"{result.get('subtype')}: {reason}", session_id=session_id
+            )
+        return WorkerResult.model_validate({**output, "session_id": session_id})
