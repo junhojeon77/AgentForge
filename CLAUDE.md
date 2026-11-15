@@ -5,7 +5,7 @@ This file gives instructions to AI coding assistants working on this project.
 ## Project Overview
 
 AgentForge is a planned local-first Windows platform where one lead agent coordinates specialized
-coding agents: five by default, and users can add, remove or fully customize any of them. M1–M3 and M4's retries, pause/resume and saved runs are implemented as a Python library in `apps/api/src/agentforge`.
+coding agents: five by default, and users can add, remove or fully customize any of them. M1–M4 (including the lead agent) are implemented as a Python library in `apps/api/src/agentforge`. LangGraph and LangChain are used only for the lead agent and the Claude Code Runnable interface; keep scheduling, saved runs and recovery in plain code.
 Everything else is planned. Keep AI reasoning separate from deterministic scheduling, validation,
 permissions and human approval.
 

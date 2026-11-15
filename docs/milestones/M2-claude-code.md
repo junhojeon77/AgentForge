@@ -26,6 +26,8 @@ M2 originally named a Codex adapter on the roadmap. It was switched to Claude Co
 | `TaskSpec.workspace_reference` | Required existing folder; becomes the process working directory |
 | `WorkerResult.session_id` | A fresh UUID per attempt, passed as `--session-id` and set on every result. Since M4 the scheduler chooses it (`Assignment.session_id`); the executor makes one up only when called without it |
 | `on_event(task_id, event)` | Receives every raw stream-json event (dict) as it arrives |
+| `ClaudeCodeRunner(command, max_budget_usd, on_event)` | Since 2026-11-15: one CLI session as a LangChain Runnable. `await runner.ainvoke(ClaudeCall(...))` returns the CLI's `result` event; `ClaudeCall` gives the prompt, folder, tools, JSON schema, session and limits. The executor and the lead agent both use it, so every session gets the same fixed flags |
+| `ClaudeCodeExecutor` as a Runnable | `await executor.ainvoke(assignment)` equals `execute(assignment)`; `invoke` raises, because everything here is async |
 
 Flags used on every call: `-p --output-format stream-json --verbose --json-schema <schema>
 --session-id <uuid> --effort <level> --tools Read,Glob,Grep --permission-prompts none --restricted

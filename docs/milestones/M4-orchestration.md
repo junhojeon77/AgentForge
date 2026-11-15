@@ -1,16 +1,18 @@
 # M4 — Retries, pause/resume, persistence and the lead agent
 
-M4 is built in four parts. The first three are implemented.
+M4 is built in four parts. All four are implemented.
 
 | Part | Status |
 |---|---|
 | Retries | Implemented (this document) |
 | Pause/resume | Implemented (this document) |
 | Persistence and recovery | Implemented (this document) |
-| Lead orchestration | Planned |
+| Lead orchestration | Implemented (this document) |
 
 Retries and pause/resume added no dependency. Persistence added SQLAlchemy 2 and Alembic, as
-the roadmap planned; SQLite itself is part of Python.
+the roadmap planned; SQLite itself is part of Python. The lead agent added LangGraph and
+LangChain core. They are used only where they fit: the lead agent's reasoning workflow and the
+Runnable interface to the Claude Code CLI. The scheduler, saved runs and recovery do not use them.
 
 ## Delivered behavior: retries
 
@@ -126,6 +128,55 @@ report = await recovering
 The crash test kills a real process in the middle of a task and recovers the run in a fresh
 `Scheduler`.
 
+## Delivered behavior: the lead agent
+
+The lead agent turns a plain-English request into a checked `RunPlan`. It plans; it does not run
+anything. Running the plan stays a separate step for a person.
+
+```powershell
+.\.venv\Scripts\python.exe -m agentforge plan "Add reverse(text) to utils.py and test it" --workspace C:\path\to\repo
+```
+
+```python
+from agentforge.claude_code import ClaudeCodeRunner
+from agentforge.lead import Planner, PlanRequest
+
+lead = Planner(ClaudeCodeRunner(command=(CLAUDE,)), roles=("backend", "qa"), workspace=repo)
+result = await lead.ainvoke(PlanRequest(request="...", run_id="r1"))  # result.plan is a RunPlan
+```
+
+It is a LangGraph workflow, and `Planner` is a LangChain Runnable:
+
+```
+draft -> check --(issues)--> revise -> check ...
+           \--(none)--> critique --(issues)--> revise
+                             \--(none)--> accepted
+```
+
+1. **draft:** one read-only Claude Code session in the repository writes a plan from the request
+   and the registered roles, through a JSON schema. LangChain's `PydanticOutputParser` reads it.
+2. **check:** plain code, no AI: the scheduler's own `validate_plan` (unique ids, known
+   dependencies, registered roles, no cycles) plus the contract rules for ids and titles.
+3. **critique:** one session reviews the plan against the request: missing work, wrong order,
+   tasks too large, criteria nobody can check.
+4. **revise:** one session gets the plan and the issues and returns a new plan, which is checked
+   again.
+5. The plan is accepted when the check passes and the critique finds nothing. When issues are left
+   after `max_revisions` (default 2), `PlanRejected` is raised with every round's issues, and no
+   plan is returned.
+
+**The model cannot grant rights.** The plan schema has only `id`, `title`, `role`, `description`,
+`objective`, `acceptance_criteria` and `dependencies`; a reply with any other field, such as
+`allowed_operations`, fails the check. Edit and check rights, the repository, attempts and
+timeouts come from the person through `task_defaults`, and default to a read-only task.
+
+### Live check (2026-11-15, Claude Code CLI 2.1.323)
+
+One approved run with `claude-haiku-5-5` on a scratch repository: the request "Add a function
+reverse(text) to utils.py that reverses a string, and test it" became two tasks, a backend task
+and a qa task that depends on it, each with checkable criteria and no rights. The critique
+accepted it on the first round. Two sessions, $0.004.
+
 ## Contract
 
 | Item | Behavior |
@@ -160,6 +211,7 @@ The report answers these after the run, with no logging set up:
 | Was the attempt continued or started again? | The `ASSIGNED` transition says `resumed on worker …` or `assigned to worker …` |
 | Why is the task in its final state? | `TaskState.message`: the failure message, `blocked by a, which is FAILED`, or who cancelled it. Also `failure_reason`, `blocked_by` and `attempt_number` |
 | Why did the task change status? | `Transition.detail` on every transition; see the table below |
+| Why was a plan rejected, or revised? | `PlanRejected.rounds` (or `PlanResult.rounds` for an accepted plan): each round's revision number, whether the check or the critique found the issues, and the issues |
 | What happened before a crash? | `RunStore(path).load(run_id)`: everything up to the last saved transition |
 | Why did a run stop with a database error? | Every unfinished task's message: `saving the run failed (OperationalError)`; the error itself is raised from `run()` |
 
@@ -195,6 +247,8 @@ logging.basicConfig(level=logging.DEBUG)
 | `agentforge.orchestration` | DEBUG | Every transition: run, task, status, attempt number, worker and the `Transition.detail` text, e.g. `run r1 task a: PAUSED (attempt 1, worker None): pause_task was called while RUNNING` |
 | `agentforge.orchestration` | WARNING | A failed attempt, with the same text as `Transition.detail`; `saving the run failed (OperationalError); stopping the run` (the error type only); `recovery refused:` and the reason (ids only) |
 | `agentforge.store` | DEBUG | A store opened: path and schema version |
+| `agentforge.lead` | DEBUG | A draft made (task count); the check or the critique found issues (count and revision); the critique accepted the plan |
+| `agentforge.lead` | WARNING | A plan rejected: revisions made and rounds with issues |
 | `agentforge.worktrees` | DEBUG | A worktree created (path and commit) or reused for a resumed attempt; a diff recorded (length only); a worktree removed by `remove_run` (path) |
 | `agentforge.worktrees` | WARNING | `remove_run` kept a folder that Git does not know as a worktree (path only; Git's message is in the raised error) |
 | `agentforge.claude_code` | DEBUG | A Claude process started or resumed (task, attempt, session id, folder, tools) and finished (exit code, result subtype) |
@@ -241,12 +295,20 @@ because those can contain secrets. Read those in the report.
   and what was spent is spent.
 - **The CLI and the demo do not save runs.** Only code that passes a store does.
 - `resume_run` resumes tasks in id order; they are then dispatched by the normal rules.
+- **A plan costs up to `2 * max_revisions + 2` Claude sessions** (six by default), each with its own
+  `max_budget_usd` cap.
+- **The critique is the model's judgement.** A plan it accepts can still be wrong; the check only
+  proves the plan is well-formed. Read a plan before you run it.
+- **The lead agent's request text is sent to Claude** and never logged; the critique's issues are kept
+  in the rounds and not logged.
+- **LangSmith tracing** comes with LangChain. AgentForge never turns it on; if you set
+  `LANGSMITH_TRACING=true` yourself, LangChain sends prompts and replies to LangSmith.
 
 ## Not implemented yet
 
 | Deferred | Waits for |
 |---|---|
-| The lead agent that turns a request into a `RunPlan` | M4, last part |
+| Running a plan straight from a request | M5, with the REST commands; today `plan` only prints it |
 | A pause that lets running work finish first | When wanted; today a pause always stops the worker |
 | A delay or backoff between attempts | When a real rate-limit failure shows the need |
 | A manual "retry this task" command | M5, with the REST commands |
@@ -272,6 +334,13 @@ Run the pytest and Ruff commands in the root README. The M4 tests cover:
   limits, the fresh-session fallback and its warning, no fallback for other failures, a rejected
   batch-file launcher, a CLI that exits before it reads its prompt, and a skipped non-JSON
   output line that is logged by length only.
+- `test_lead.py` (fake CLI replying from a script): a plan accepted on the first draft; a role no
+  agent has, and a critique issue, each fixed by a revision; a plan that never converges rejected
+  after six sessions with every round and a WARNING; a reply that tries to grant `allowed_operations`
+  rejected; rights coming only from `task_defaults`; the request text never logged; the `plan`
+  command printing the plan, and exiting 1 with the rounds when rejected.
+- `test_claude_code.py`, interface: `ClaudeCodeExecutor.ainvoke` equals `execute`, and `ClaudeCodeRunner`
+  composes with other LangChain Runnables.
 - `test_store.py`: migrations up and down on a disposable database, a saved run loading back
   equal to the report, a run id saved once, a real process killed mid-task and recovered (the
   task paused with its reason, then the same attempt and session continued), recovery refused

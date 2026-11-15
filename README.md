@@ -3,9 +3,9 @@
 A local-first Windows platform where one lead agent coordinates specialized coding agents. It ships
 with five, and you can add, remove or fully customize any of them.
 
-**Status:** M1–M3 and the first three parts of M4 (task retries, pause/resume, and saved runs with
-recovery) are implemented as a Python library. The desktop app, REST API and the lead agent are
-planned, not built.
+**Status:** M1–M4 are implemented as a Python library: workers, worktrees, retries,
+pause/resume, saved runs with recovery, and a lead agent that turns a request into a plan. The
+REST API and the desktop app are planned, not built.
 
 ## What is AgentForge
 
@@ -25,6 +25,9 @@ What exists today is the core library (`apps/api/src/agentforge`):
   run its own check commands.
 - **Worktrees:** each task can get its own Git worktree, and its diff is recorded.
 - **Validation:** a validator that runs your check commands, such as pytest, on the result.
+- **Lead agent:** a LangGraph workflow that turns a plain-English request into a task plan,
+  checks it with the scheduler's rules, has Claude critique it and revises it. It cannot grant
+  edit rights; you do.
 
 The mock demo and the offline tests need no account or API key. Real Claude Code workers use your
 logged-in Claude Code install.
@@ -80,7 +83,7 @@ flowchart LR
   edit, add or remove agents.
 
 A run can be saved to SQLite and recovered after a restart; without a store it lives in memory only.
-What is built and what is planned (the lead agent, the API and the desktop app) is in
+What is built and what is planned (the API and the desktop app) is in
 [ROADMAP.md](ROADMAP.md).
 
 ## Prerequisites
@@ -269,7 +272,18 @@ attempt in the same worktree. `RunStore(default_path()).unfinished_runs()` lists
 The database holds diffs and failure messages, so treat it like the report. Details are in
 [the M4 doc](docs/milestones/M4-orchestration.md#delivered-behavior-persistence-and-recovery).
 
-### 8. Verify
+### 8. Turn a request into a plan
+
+```powershell
+.\.venv\Scripts\python.exe -m agentforge plan "Add reverse(text) to utils.py and test it" --workspace C:\path\to\repo
+```
+
+The lead agent drafts tasks for your agents' roles, checks them, has Claude critique them and
+revises them, then prints the plan as JSON. It does not run it, and every task is read-only until
+you give it rights. Each plan is billed: up to six short Claude sessions by default. Details are in
+[the M4 doc](docs/milestones/M4-orchestration.md#delivered-behavior-the-lead-agent).
+
+### 9. Verify
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest apps/api/tests
@@ -326,5 +340,5 @@ app (M6), which will call these same functions.
   outcome mapping, the live check, the timeout and the `claude` command.
 - [M3: worktrees and validation](docs/milestones/M3-worktrees.md): worktrees, edit mode, diffs,
   check commands, risks and deferred work.
-- [M4: retries, pause/resume and saved runs](docs/milestones/M4-orchestration.md): retry rules, pause and
+- [M4: retries, pause/resume, saved runs and the lead agent](docs/milestones/M4-orchestration.md): retry rules, pause and
   resume, how to debug a run, limits and the M4 parts still planned.

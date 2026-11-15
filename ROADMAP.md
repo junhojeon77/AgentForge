@@ -5,7 +5,7 @@ can add, remove or fully customize any of them. Adding, removing and editing age
 today (M2). On-screen editing is planned for M6.
 
 AgentForge is built in milestones. M1, M2, M3 and the retry, pause/resume and persistence parts of
-M4 are implemented. The rest is direction, not a promise, and not permission to start a later milestone
+M4, and its lead agent, are implemented. The rest is direction, not a promise, and not permission to start a later milestone
 early (see [GOVERNANCE.md](GOVERNANCE.md)).
 
 | Milestone | Scope | Status |
@@ -13,14 +13,14 @@ early (see [GOVERNANCE.md](GOVERNANCE.md)).
 | M1 | Domain contracts, deterministic scheduler, five mock workers | Implemented within [documented limits](docs/milestones/M1-domain.md) |
 | M2 | Read-only Claude Code worker, model/effort settings, session IDs, structured results, event callback, editable agent personas | Implemented within [documented limits](docs/milestones/M2-claude-code.md) |
 | M3 | One Git worktree per task, edit-capable workers that may run only their own checks, recorded diffs, a validator that runs check commands | Implemented within [documented limits](docs/milestones/M3-worktrees.md) |
-| M4 | Lead orchestration, retries, pause/resume, persistence and recovery | Retries, pause/resume, persistence and recovery implemented within [documented limits](docs/milestones/M4-orchestration.md); the lead is planned |
+| M4 | Lead orchestration, retries, pause/resume, persistence and recovery | Retries, pause/resume, persistence and recovery implemented within [documented limits](docs/milestones/M4-orchestration.md); the lead agent implemented on 2026-11-15 |
 | M5 | FastAPI REST commands, approvals and SSE events | Planned |
 | M6 | Tauri 2 desktop dashboard (React, TypeScript), including on-screen agent editing | Planned |
 | M7 | Integration candidates, conflict detection, review and approved integration | Planned |
 | M8 | Windows packaging, backend lifecycle, secure local communication and recovery checks | Planned |
 
-SQLAlchemy and Alembic were added for M4's persistence on 2026-11-15. FastAPI, LangGraph, Tauri
-and the frontend stack are planned, not installed. Add each only when its milestone is approved.
+SQLAlchemy and Alembic were added for M4's persistence, and LangGraph and LangChain core for the
+lead agent, on 2026-11-15. FastAPI, Tauri and the frontend stack are planned, not installed. Add each only when its milestone is approved.
 
 ## Deferred from M2, M3 and the built parts of M4
 
@@ -33,7 +33,7 @@ finished on 2026-11-14, and workers running their own checks on 2026-11-15. Deta
 From M4's retries and pause/resume: a delay between attempts, a manual retry command and a pause
 that lets running work finish. Details are in the
 [M4 doc](docs/milestones/M4-orchestration.md#not-implemented-yet).
-The lead agent is the part of M4 still to build.
+All four parts of M4 are built.
 
 ## Guidance for planned milestones
 
@@ -47,6 +47,8 @@ The lead agent is the part of M4 still to build.
   and fixtures.
 - **Persistence (M4):** SQLite + SQLAlchemy + Alembic; test migrations on disposable databases.
   LangGraph may coordinate reasoning, but the deterministic scheduler owns dispatch and state.
+  Since 2026-11-15 LangGraph runs the lead agent's draft, critique and revise workflow, and the
+  Claude Code CLI is a LangChain Runnable; scheduling, saved runs and recovery do not use them.
 - **Desktop (M6, `apps/desktop`):** Tauri 2/Rust, React/TypeScript, Vite, Tailwind, shadcn/ui,
   Zustand, TanStack Query, Vitest. Follow the implemented REST/SSE contracts. Show loading,
   empty, failure and recovery states; provide semantic controls, accessible names, keyboard
@@ -55,6 +57,12 @@ The lead agent is the part of M4 still to build.
   calls the existing `agentforge.personas` functions.
 
 ## Verification history
+
+Verified on 2026-11-15 after adding the lead agent: **184 tests passed and 1 skipped** (the opt-in
+live Claude Code test), Ruff lint passed, and all 28 Python files passed the formatting check.
+Separately, one approved live planning run (Claude Code 2.1.323, `claude-haiku-5-5`, two sessions,
+$0.004) produced a two-task plan that the critique accepted; see
+[the M4 doc](docs/milestones/M4-orchestration.md#live-check-2026-11-15-claude-code-cli-21323).
 
 Verified on 2026-11-15 after M4's persistence and recovery: **175 tests passed and 1 skipped**
 (the opt-in live Claude Code test), Ruff lint passed, and all 26 Python files passed the

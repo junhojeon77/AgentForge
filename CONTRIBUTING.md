@@ -19,6 +19,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m agentforge                      # five-worker mock demo, prints JSON report
 .\.venv\Scripts\python.exe -m agentforge setup                # copy default personas to %APPDATA%\AgentForge\agents
 .\.venv\Scripts\python.exe -m agentforge claude "<task>"       # one read-only Claude Code task (billed)
+.\.venv\Scripts\python.exe -m agentforge plan "<request>"      # lead agent: print a task plan (billed)
 .\.venv\Scripts\python.exe -m agentforge clean <run_id> --repo <repo> --root <root>  # delete a finished run's worktrees
 .\.venv\Scripts\python.exe -m pytest apps/api/tests          # all tests
 .\.venv\Scripts\python.exe -m pytest apps/api/tests/test_scheduler.py::test_empty_plan   # single test
@@ -157,7 +158,11 @@ state is lost when the process exits.
   `expected_output` ⊆ artifacts, `acceptance_criteria` ⊆ satisfied criteria, and each
   `check:<name>` constraint ⊆ `passed_checks`. It never inspects files or runs commands.
   `register_default_workers` registers `default_agents()`.
-- **`claude_code.py`: `ClaudeCodeExecutor`.** Runs one `claude -p --output-format stream-json`
+- **`claude_code.py`: `ClaudeCodeRunner` and `ClaudeCodeExecutor`.** `ClaudeCodeRunner` is a
+  LangChain Runnable that runs one CLI session from a `ClaudeCall` and returns its `result`
+  event; it owns the fixed flags, the batch-file check, the process handling and the
+  no-session fallback. `ClaudeCodeExecutor` (also a Runnable) builds a worker's call and
+  runs it through the runner. Together they run one `claude -p --output-format stream-json`
   process per task in the task's `workspace_reference` folder, read-only (`--tools
   Read,Glob,Grep --permission-prompts none --restricted --strict-mcp-config`), or with
   `Edit,Write` and `--permission-mode acceptEdits` added when the task allows `"edit"`. A task
@@ -194,6 +199,12 @@ state is lost when the process exits.
   when run from the command line). `Scheduler._record` calls `save()` on every transition;
   a failed save sets `_store_error`, which `_drive()` raises, cancelling the run. `recover()`
   loads a run, pauses in-flight tasks through the pause path and adds them to `_run_paused`.
+- **`lead.py`: the lead agent.** `Planner` is a LangChain Runnable around a compiled LangGraph
+  `StateGraph` with the nodes draft, check, critique and revise. Draft, critique and revise are
+  read-only `ClaudeCodeRunner` sessions with prompts from `PromptTemplate` and replies read by
+  `PydanticOutputParser`. check is plain code: `orchestration.validate_plan`, the same rules the
+  scheduler applies, so the two cannot drift. `TaskDraft` lists the only fields the model may
+  set; rights and limits come from `task_defaults`.
 - **`validation.py`: `CommandValidator`.** Runs each `check:<name>` constraint as a configured
   argv (no shell) in the result's workspace with a timeout. It rejects on a non-zero exit, a
   timeout or an unknown check, and never reads the worker's `passed_checks`. Timeout and
@@ -222,6 +233,8 @@ Tests are in `apps/api/tests/`:
   `fixtures/claude_stream.jsonl` (a trimmed live recording). Its live test is opt-in.
 - `test_worktrees.py`: worktrees and diffs in disposable Git repositories, plus full
   edit → diff → check runs with the fake Claude, one of them retried after a failing check.
+- `test_lead.py`: the lead agent, with `fake_claude.py` in `script` mode replying from a prepared
+  list, one reply per call.
 - `test_store.py`: saved runs, migrations and recovery on disposable databases. `crash_run.py` is a
   run that the crash test kills mid-task in a real subprocess.
 - `test_validation.py`: the command validator. Its `hanging` fixture is a check that reports
