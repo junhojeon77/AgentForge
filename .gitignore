@@ -7,3 +7,4 @@ __pycache__/
 build/
 dist/
 docs/DECISIONS.md
+apps/api/scratch.db

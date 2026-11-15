@@ -4,7 +4,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Iterable
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 
@@ -25,7 +25,12 @@ from agentforge.domain import (
     WorkerState,
 )
 
+if TYPE_CHECKING:
+    from agentforge.store import RunStore
+
 logger = logging.getLogger(__name__)
+# Statuses of a worker in flight; after a restart such a task is paused for a person to resume.
+_IN_FLIGHT = (TaskStatus.ASSIGNED, TaskStatus.RUNNING, TaskStatus.VALIDATING)
 
 
 class WorkerExecutor(Protocol):
@@ -44,7 +49,13 @@ class Scheduler:
     with asyncio cancellation. This is not a process or thread scheduler.
     """
 
-    def __init__(self, *, validator: ResultValidator, max_concurrency: int = 5):
+    def __init__(
+        self,
+        *,
+        validator: ResultValidator,
+        max_concurrency: int = 5,
+        store: "RunStore | None" = None,
+    ):
         if type(max_concurrency) is not int or not 1 <= max_concurrency <= 5:
             raise ValueError("max_concurrency must be an integer from 1 to 5")
         self._validator = validator
@@ -62,6 +73,9 @@ class Scheduler:
         self._running = False
         self._run_id: str | None = None
         self._wake = asyncio.Event()
+        # With a store, every transition is saved as it happens; a failed save stops the run.
+        self._store = store
+        self._store_error: Exception | None = None
 
     def register_worker(self, agent: AgentConfig, executor: WorkerExecutor) -> None:
         if self._running:
@@ -116,26 +130,86 @@ class Scheduler:
     async def run(self, plan: RunPlan) -> RunReport:
         if self._running or self._active:
             raise ValueError("a run is already active")
-        plan, self._dependents = self._validate_plan(plan)
+        plan, dependents = self._validate_plan(plan)
+        if self._store is not None:
+            self._store.start_run(plan)
+        self._begin(plan.id, dependents, {task.id: TaskState(task=task) for task in plan.tasks})
+        for task in plan.tasks:
+            self._record(task.id, TaskStatus.PENDING, "queued")
+        return await self._drive()
+
+    async def recover(self, run_id: str) -> RunReport:
+        """Continue a saved run that a crash or restart interrupted.
+
+        Work that was in flight is paused, so nothing billed starts until a person calls
+        `resume_run()` (or `resume_task`); it then continues the same attempt. Returns the
+        report when every task is finished, like `run()`.
+        """
+        if self._store is None:
+            raise ValueError("recover needs a store: Scheduler(..., store=RunStore(path))")
+        if self._running or self._active:
+            raise ValueError("a run is already active")
+        saved = self._store.load(run_id)
+        try:
+            if saved is None:
+                raise ValueError(f"run {run_id} is not saved")
+            plan, report = saved
+            if all(state.status in TERMINAL for state in report.tasks):
+                raise ValueError(f"run {run_id} has finished; nothing to recover")
+            for attempt in report.attempts:
+                if attempt.status not in TERMINAL and attempt.worker_id not in self._workers:
+                    raise ValueError(
+                        f"run {run_id} needs worker {attempt.worker_id}, which is not registered"
+                    )
+            plan, dependents = self._validate_plan(plan)
+        except ValueError as error:
+            logger.warning("run %s: recovery refused: %s", run_id, error)
+            raise
+        self._begin(run_id, dependents, {state.task.id: state for state in report.tasks})
+        self._attempts = {(a.task_id, a.number): a for a in report.attempts}
+        self._transitions = list(report.transitions)
+        for task_id, state in self._states.items():
+            if state.status in _IN_FLIGHT:
+                why = f"recovered after a restart while {state.status}"
+                self._transition(
+                    task_id, TaskStatus.PAUSED, detail=why, message=why, worker_id=None
+                )
+                self._run_paused.add(task_id)  # so resume_run() continues it
+            elif state.status == TaskStatus.READY:
+                # PENDING, so dispatch checks the dependencies again like any waiting task.
+                self._transition(task_id, TaskStatus.PENDING, detail="recovered after a restart")
+        return await self._drive()
+
+    def _begin(
+        self, run_id: str, dependents: dict[str, list[str]], states: dict[str, TaskState]
+    ) -> None:
         self._running = True
-        self._run_id = plan.id
-        self._states = {task.id: TaskState(task=task) for task in plan.tasks}
+        self._run_id = run_id
+        self._dependents = dependents
+        self._states = states
         self._attempts = {}
         self._transitions = []
         self._run_paused = set()
+        self._store_error = None
         self._wake = asyncio.Event()
-        for task in plan.tasks:
-            self._record(task.id, TaskStatus.PENDING, "queued")
+
+    async def _drive(self) -> RunReport:
+        """Dispatch until every task is finished; on any error, stop the work and re-raise."""
         try:
             while True:
                 self._wake.clear()
+                if self._store_error is not None:
+                    raise self._store_error
                 self._dispatch()
                 if not self._active and all(s.status in TERMINAL for s in self._states.values()):
                     return self.snapshot()
                 await self._wake.wait()
         except BaseException as error:
             # The type name only: the reason is logged, and an exception's text can hold anything.
-            why = f"run() stopped by {type(error).__name__}"
+            if error is self._store_error:
+                why = f"saving the run failed ({type(error).__name__})"
+            else:
+                why = f"run() stopped by {type(error).__name__}"
             # Shielded so a repeated caller cancellation cannot interrupt worker cleanup.
             await asyncio.shield(self._cancel_all(why))
             raise
@@ -153,6 +227,25 @@ class Scheduler:
             "run %s task %s: %s (attempt %d, worker %s): %s",
             self._run_id, task_id, status, state.attempt_number, state.worker_id, detail,
         )  # fmt: skip
+        if self._store is None or self._store_error is not None:
+            return
+        try:
+            # shortcut: a blocking SQLite write on the event loop, milliseconds at five
+            # workers; move it to a writer thread if runs grow large.
+            self._store.save(
+                self._run_id,
+                state,
+                self._attempts.get((task_id, state.attempt_number)),
+                self._transitions[-1],
+            )
+        except Exception as error:
+            # A run that cannot be saved must not keep spending: the run loop stops it.
+            self._store_error = error
+            logger.warning(
+                "run %s: saving the run failed (%s); stopping the run",
+                self._run_id, type(error).__name__,
+            )  # fmt: skip
+            self._wake.set()
 
     def _transition(self, task_id: str, status: TaskStatus, *, detail: str = "", **changes) -> bool:
         state = self._states[task_id]
@@ -185,7 +278,7 @@ class Scheduler:
             key=lambda s: (-s.task.priority, s.task.id),
         )
         for state in candidates:
-            if len(self._active) >= self._cap:
+            if len(self._active) >= self._cap or self._store_error is not None:
                 break
             task_id = state.task.id
             if task_id in self._active:  # paused and resumed while its worker is still stopping
