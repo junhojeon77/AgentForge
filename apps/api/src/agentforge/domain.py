@@ -24,6 +24,7 @@ class TaskStatus(StrEnum):
     ASSIGNED = "ASSIGNED"
     RUNNING = "RUNNING"
     VALIDATING = "VALIDATING"
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"  # a person must approve the diff first
     COMPLETED = "COMPLETED"
     PAUSED = "PAUSED"
     BLOCKED = "BLOCKED"
@@ -43,6 +44,7 @@ class FailureReason(StrEnum):
     INVALID_RESULT = "invalid_result"
     VALIDATION_REJECTED = "validation_rejected"
     VALIDATOR_EXCEPTION = "validator_exception"
+    REVIEW_REJECTED = "review_rejected"  # a person rejected the diff
 
 
 class AgentConfig(Contract):
@@ -142,6 +144,25 @@ class Transition(Contract):
     task_id: str
     status: TaskStatus
     detail: str = ""  # why, when the status alone does not say: the retry decision
+
+
+class PlanRound(Contract):
+    """One round of the lead agent that found issues: in the check (rules) or the critique."""
+
+    revision: int  # the plan revision these issues are about; 0 is the first draft
+    source: Literal["check", "critique"]
+    issues: tuple[str, ...]
+
+
+class Proposal(Contract):
+    """A plan waiting for a person to approve it, with the rights its tasks get, or reject it."""
+
+    id: Identifier  # the plan's id, which becomes the run's id
+    plan: RunPlan
+    source: Literal["lead", "hand"]  # the lead agent wrote it, or a person did
+    rounds: tuple[PlanRound, ...] = ()  # the lead agent's rounds with issues
+    status: Literal["pending", "approved", "rejected"] = "pending"
+    reason: str = ""  # why it was rejected
 
 
 class RunReport(Contract):

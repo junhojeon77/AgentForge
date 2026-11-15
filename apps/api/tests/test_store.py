@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import pathlib
 import subprocess
@@ -9,9 +10,9 @@ import sqlalchemy
 from alembic import command
 from alembic.config import Config
 from sqlalchemy.exc import OperationalError
-from test_scheduler import GatedExecutor, by_id, loop_turn, plan, task
+from test_scheduler import GatedExecutor, by_id, loop_turn, plan, task, wait_for
 
-from agentforge.domain import AgentConfig, TaskStatus
+from agentforge.domain import AgentConfig, PlanRound, Proposal, TaskStatus, WorkerResult
 from agentforge.mocks import MockExecutor, MockValidator
 from agentforge.orchestration import Scheduler
 from agentforge.store import RunStore
@@ -43,9 +44,9 @@ def test_migrations_create_the_tables_and_downgrade_to_nothing(tmp_path, caplog)
     path = tmp_path / "runs.db"
     RunStore(path)
     engine = sqlalchemy.create_engine(f"sqlite:///{path}")
-    tables = {"alembic_version", "runs", "tasks", "attempts", "transitions"}
+    tables = {"alembic_version", "runs", "tasks", "attempts", "transitions", "proposals"}
     assert set(sqlalchemy.inspect(engine).get_table_names()) == tables
-    assert f"run store opened: {path} (schema 0001)" in caplog.messages
+    assert f"run store opened: {path} (schema 0002)" in caplog.messages
 
     config = Config()
     config.set_main_option("script_location", "agentforge:migrations")
@@ -185,3 +186,105 @@ async def test_run_that_cannot_be_saved_is_stopped(tmp_path, caplog):
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert warnings == ["run run: saving the run failed (OperationalError); stopping the run"]
     assert "SECRET-TOKEN" not in caplog.text
+
+
+class FrozenStore(RunStore):
+    """Stops saving once frozen, like a process that died."""
+
+    frozen = False
+
+    def save(self, run_id, state, attempt, transition):
+        if not self.frozen:
+            super().save(run_id, state, attempt, transition)
+
+
+async def test_a_diff_waiting_for_approval_still_waits_after_a_restart(tmp_path):
+    path = tmp_path / "runs.db"
+    store = FrozenStore(path)
+    first = Scheduler(validator=MockValidator(), store=store, review_edits=True)
+    first.register_worker(AgentConfig(id="worker", role="backend"), MockExecutor())
+    running = asyncio.create_task(first.run(plan(task("a", allowed_operations=("edit",)))))
+    await wait_for(first, "a", TaskStatus.AWAITING_APPROVAL)
+    store.frozen = True
+    running.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await running
+
+    second = Scheduler(validator=MockValidator(), store=RunStore(path), review_edits=True)
+    second.register_worker(AgentConfig(id="worker", role="backend"), MockExecutor())
+    recovering = asyncio.create_task(second.recover("run"))
+    await wait_for(second, "a", TaskStatus.AWAITING_APPROVAL)
+    await second.approve_task("a")
+    report = await asyncio.wait_for(recovering, 2)
+
+    assert report.successful
+    assert len(report.attempts) == 1  # the approved diff was validated, not redone
+
+
+async def test_a_finished_run_is_reopened_to_retry_a_failed_task(tmp_path, caplog):
+    path = tmp_path / "runs.db"
+    failing = scheduler(RunStore(path), MockExecutor(result=WorkerResult(success=False)))
+    failed = await failing.run(plan(task("a"), task("b", dependencies=("a",))))
+    assert [s.status for s in failed.tasks] == [TaskStatus.FAILED, TaskStatus.BLOCKED]
+
+    fixed = scheduler(RunStore(path))
+    report = await fixed.recover("run", retry=["a"])
+
+    assert report.successful
+    assert by_id(report)["a"].attempt_number == 2
+    details = [(t.task_id, t.detail) for t in report.transitions]
+    assert ("a", "retry was called; attempt limit is 2") in details
+    assert ("b", "unblocked: retry was called on a") in details
+    with pytest.raises(ValueError, match="run run has no task nope"):
+        await fixed.recover("run", retry=["nope"])
+    with pytest.raises(ValueError, match="only a failed or cancelled task can be retried"):
+        await fixed.recover("run", retry=["a"])
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(w.startswith("run run task a: retry refused: task a is COMPLETED") for w in warnings)
+
+
+def proposal(run_id="r1", **changes):
+    values = {"id": run_id, "plan": plan_for(run_id), "source": "hand"}
+    return Proposal(**(values | changes))
+
+
+def plan_for(run_id):
+    from agentforge.domain import RunPlan, TaskSpec
+
+    return RunPlan(id=run_id, tasks=(TaskSpec(id="a", run_id=run_id, title="a", role="backend"),))
+
+
+def test_a_plan_waits_as_a_proposal_until_a_person_decides(tmp_path, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    store = RunStore(tmp_path / "runs.db")
+    rounds = (PlanRound(revision=0, source="critique", issues=("SECRET-ISSUE",)),)
+    store.propose(proposal(source="lead", rounds=rounds))
+
+    saved = RunStore(tmp_path / "runs.db").get_proposal("r1")
+    assert saved.status == "pending" and saved.source == "lead" and saved.rounds == rounds
+    assert store.get_proposal("nope") is None
+
+    approved_plan = plan_for("r1")
+    decided = store.decide_proposal("r1", "approved", plan=approved_plan)
+    assert decided.status == "approved" and decided.plan == approved_plan
+    with pytest.raises(ValueError, match="proposal r1 is approved, not pending"):
+        store.decide_proposal("r1", "rejected", reason="too late")
+    assert "proposal r1 saved (lead)" in caplog.messages
+    assert "proposal r1 approved" in caplog.messages
+    assert "SECRET-ISSUE" not in caplog.text
+
+
+def test_a_rejected_proposal_keeps_its_reason_and_ids_are_used_once(tmp_path, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    store = RunStore(tmp_path / "runs.db")
+    store.propose(proposal())
+    rejected = store.decide_proposal("r1", "rejected", reason="SECRET-REASON: split task a")
+    assert rejected.reason == "SECRET-REASON: split task a"
+    with pytest.raises(ValueError, match="proposal r1 already exists"):
+        store.propose(proposal())
+    store.start_run(plan_for("r2"))
+    with pytest.raises(ValueError, match="run r2 is already saved"):
+        store.propose(proposal("r2"))
+    with pytest.raises(ValueError, match="no proposal nope"):
+        store.decide_proposal("nope", "approved", plan=plan_for("nope"))
+    assert "SECRET-REASON" not in caplog.text

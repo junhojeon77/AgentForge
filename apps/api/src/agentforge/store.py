@@ -29,6 +29,7 @@ from sqlalchemy.dialects.sqlite import insert
 
 from agentforge.domain import (
     TERMINAL,
+    Proposal,
     RunPlan,
     RunReport,
     TaskAttempt,
@@ -73,6 +74,18 @@ TRANSITIONS = Table(
     Column("task_id", String, nullable=False),
     Column("status", String, nullable=False),
     Column("detail", Text, nullable=False),
+)
+
+
+PROPOSALS = Table(
+    "proposals",
+    METADATA,
+    Column("id", String, primary_key=True),
+    Column("source", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("proposal", Text, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("decided_at", String, nullable=True),
 )
 
 
@@ -188,6 +201,67 @@ class RunStore:
                 ),
             )
         return RunPlan.model_validate_json(plan), report
+
+    def propose(self, proposal: Proposal) -> None:
+        """Save a plan to wait for a person. Its id must not be used by a run or a proposal."""
+        proposal = Proposal.model_validate(proposal)
+        with self._engine.begin() as connection:
+            if connection.scalar(select(RUNS.c.id).where(RUNS.c.id == proposal.id)):
+                raise ValueError(f"run {proposal.id} is already saved; use a new run id")
+            if connection.scalar(select(PROPOSALS.c.id).where(PROPOSALS.c.id == proposal.id)):
+                raise ValueError(f"proposal {proposal.id} already exists")
+            connection.execute(
+                PROPOSALS.insert().values(
+                    id=proposal.id,
+                    source=proposal.source,
+                    status=proposal.status,
+                    proposal=proposal.model_dump_json(),
+                    created_at=_now(),
+                )
+            )
+        logger.debug("proposal %s saved (%s)", proposal.id, proposal.source)
+
+    def get_proposal(self, proposal_id: str) -> Proposal | None:
+        with self._engine.connect() as connection:
+            saved = connection.scalar(
+                select(PROPOSALS.c.proposal).where(PROPOSALS.c.id == proposal_id)
+            )
+        return None if saved is None else Proposal.model_validate_json(saved)
+
+    def decide_proposal(
+        self,
+        proposal_id: str,
+        status: str,
+        *,
+        reason: str = "",
+        plan: RunPlan | None = None,
+    ) -> Proposal:
+        """Approve (with the plan as approved, rights included) or reject a pending proposal."""
+        with self._engine.begin() as connection:
+            saved = connection.scalar(
+                select(PROPOSALS.c.proposal).where(PROPOSALS.c.id == proposal_id)
+            )
+            if saved is None:
+                raise ValueError(f"no proposal {proposal_id}")
+            proposal = Proposal.model_validate_json(saved)
+            if proposal.status != "pending":
+                raise ValueError(f"proposal {proposal_id} is {proposal.status}, not pending")
+            update = {"status": status, "reason": reason}
+            if plan is not None:
+                update["plan"] = plan
+            proposal = Proposal.model_validate(proposal.model_dump() | update)
+            connection.execute(
+                PROPOSALS.update()
+                .where(PROPOSALS.c.id == proposal_id)
+                .values(
+                    status=proposal.status,
+                    proposal=proposal.model_dump_json(),
+                    decided_at=_now(),
+                )
+            )
+        # The decision only: a reason is a person's text and stays in the store.
+        logger.debug("proposal %s %s", proposal_id, proposal.status)
+        return proposal
 
     def unfinished_runs(self) -> list[str]:
         """Ids of saved runs with a task that is not finished, oldest first."""

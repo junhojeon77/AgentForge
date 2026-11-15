@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
@@ -92,6 +92,8 @@ class Scheduler:
         validator: ResultValidator,
         max_concurrency: int = 5,
         store: "RunStore | None" = None,
+        review_edits: bool = False,
+        on_transition: Callable[[str, Transition], None] | None = None,
     ):
         if type(max_concurrency) is not int or not 1 <= max_concurrency <= 5:
             raise ValueError("max_concurrency must be an integer from 1 to 5")
@@ -113,6 +115,12 @@ class Scheduler:
         # With a store, every transition is saved as it happens; a failed save stops the run.
         self._store = store
         self._store_error: Exception | None = None
+        # A task that edits waits for a person to approve its diff before the checks run
+        # the code it wrote.
+        self._review_edits = review_edits
+        self._approved: set[tuple[str, int]] = set()  # attempts approved, not yet validated
+        # Told every transition as it happens, e.g. to stream it to a client.
+        self._on_transition = on_transition
 
     def register_worker(self, agent: AgentConfig, executor: WorkerExecutor) -> None:
         if self._running:
@@ -122,6 +130,10 @@ class Scheduler:
             raise ValueError(f"duplicate worker: {agent.id}")
         self._workers[agent.id] = WorkerState(agent=agent)
         self._executors[agent.id] = executor
+
+    @property
+    def running(self) -> bool:
+        return self._running
 
     def snapshot(self) -> RunReport:
         return RunReport(
@@ -146,13 +158,15 @@ class Scheduler:
             self._record(task.id, TaskStatus.PENDING, "queued")
         return await self._drive()
 
-    async def recover(self, run_id: str) -> RunReport:
+    async def recover(self, run_id: str, retry: Iterable[str] = ()) -> RunReport:
         """Continue a saved run that a crash or restart interrupted.
 
         Work that was in flight is paused, so nothing billed starts until a person calls
         `resume_run()` (or `resume_task`); it then continues the same attempt. Returns the
-        report when every task is finished, like `run()`.
+        report when every task is finished, like `run()`. Tasks named in `retry` get one
+        more attempt, as with `retry_task`; then even a finished run is reopened.
         """
+        retry = tuple(retry)
         if self._store is None:
             raise ValueError("recover needs a store: Scheduler(..., store=RunStore(path))")
         if self._running or self._active:
@@ -162,7 +176,12 @@ class Scheduler:
             if saved is None:
                 raise ValueError(f"run {run_id} is not saved")
             plan, report = saved
-            if all(state.status in TERMINAL for state in report.tasks):
+            saved_states = {state.task.id: state for state in report.tasks}
+            for task_id in retry:
+                if task_id not in saved_states:
+                    raise ValueError(f"run {run_id} has no task {task_id}")
+                self._retry_limit(saved_states[task_id], run_id)
+            if not retry and all(state.status in TERMINAL for state in report.tasks):
                 raise ValueError(f"run {run_id} has finished; nothing to recover")
             for attempt in report.attempts:
                 if attempt.status not in TERMINAL and attempt.worker_id not in self._workers:
@@ -186,6 +205,8 @@ class Scheduler:
             elif state.status == TaskStatus.READY:
                 # PENDING, so dispatch checks the dependencies again like any waiting task.
                 self._transition(task_id, TaskStatus.PENDING, detail="recovered after a restart")
+        for task_id in retry:
+            self._reopen(task_id)
         return await self._drive()
 
     def _begin(
@@ -198,6 +219,7 @@ class Scheduler:
         self._attempts = {}
         self._transitions = []
         self._run_paused = set()
+        self._approved = set()
         self._store_error = None
         self._wake = asyncio.Event()
 
@@ -235,6 +257,14 @@ class Scheduler:
             "run %s task %s: %s (attempt %d, worker %s): %s",
             self._run_id, task_id, status, state.attempt_number, state.worker_id, detail,
         )  # fmt: skip
+        if self._on_transition is not None:
+            try:
+                self._on_transition(self._run_id, self._transitions[-1])
+            except Exception as error:
+                # A listener's bug must not stop the run; the transition is in the report.
+                logger.warning(
+                    "run %s: on_transition failed (%s)", self._run_id, type(error).__name__
+                )
         if self._store is None or self._store_error is not None:
             return
         try:
@@ -348,7 +378,11 @@ class Scheduler:
             # A result already on the attempt means the pause came during validation: the
             # worker is done, so only the validation runs again.
             result = self._attempts[attempt].result
-            detail = "validating again after a pause"
+            if attempt in self._approved:
+                self._approved.discard(attempt)
+                detail = "the diff was approved; validating"
+            else:
+                detail = "validating again after a pause"
             if result is None:
                 started = "worker resumed" if assignment.resume else "worker started"
                 if not self._transition(task_id, TaskStatus.RUNNING, detail=started):
@@ -378,6 +412,15 @@ class Scheduler:
                 )
                 if not result.success:
                     self._fail(task_id, FailureReason.WORKER_FAILURE, result.message)
+                    return
+                if self._review_edits and "edit" in assignment.task.allowed_operations:
+                    # The worker is freed (finally, below) so a person can take their time.
+                    self._transition(
+                        task_id,
+                        TaskStatus.AWAITING_APPROVAL,
+                        detail="worker reported success; waiting for a person to approve the diff",
+                        worker_id=None,
+                    )
                     return
                 detail = "worker reported success; validating"
             if not self._transition(task_id, TaskStatus.VALIDATING, detail=detail):
@@ -421,9 +464,13 @@ class Scheduler:
 
     def _fail(self, task_id: str, reason: FailureReason, message: str) -> None:
         state = self._states[task_id]
-        # Only work in flight can fail: a late error from a worker that was stopped by a pause
-        # or a cancellation changes nothing.
-        if state.status not in (TaskStatus.RUNNING, TaskStatus.VALIDATING):
+        # Only work in flight, or a diff waiting for a person, can fail: a late error from a
+        # worker that was stopped by a pause or a cancellation changes nothing.
+        if state.status not in (
+            TaskStatus.RUNNING,
+            TaskStatus.VALIDATING,
+            TaskStatus.AWAITING_APPROVAL,
+        ):
             return
         number, limit = state.attempt_number, state.task.max_attempts
         # A validator that cannot run is a setup problem; a rerun would bill the worker again.
@@ -507,7 +554,8 @@ class Scheduler:
         held = []
         for task_id in task_ids:
             before = self._states[task_id].status
-            if before in TERMINAL or before == TaskStatus.PAUSED:
+            # A diff waiting for a person stays waiting: resuming it would skip the approval.
+            if before in TERMINAL or before in (TaskStatus.PAUSED, TaskStatus.AWAITING_APPROVAL):
                 continue
             detail = f"{why} while {before}"
             self._transition(
@@ -546,6 +594,81 @@ class Scheduler:
         if task_id not in self._states:
             raise KeyError(task_id)
         self._release([task_id], "resume_task was called")
+
+    def _waiting(self, task_id: str) -> TaskState:
+        if task_id not in self._states:
+            raise KeyError(task_id)
+        state = self._states[task_id]
+        if state.status != TaskStatus.AWAITING_APPROVAL:
+            raise ValueError(f"task {task_id} is not waiting for approval (it is {state.status})")
+        return state
+
+    async def approve_task(self, task_id: str) -> None:
+        """Let a diff waiting for a person go on to the checks."""
+        state = self._waiting(task_id)
+        self._approved.add((task_id, state.attempt_number))
+        # PENDING: dispatched again, the attempt already has its result, so only the
+        # validation runs, on the worker that made the diff.
+        self._transition(task_id, TaskStatus.PENDING, detail="approve_task was called")
+        self._wake.set()
+
+    async def reject_task(self, task_id: str, reason: str) -> None:
+        """Fail the attempt with your reason; a retry, if any is left, is told it."""
+        self._waiting(task_id)
+        self._fail(task_id, FailureReason.REVIEW_REJECTED, reason)
+        self._wake.set()
+
+    def _retry_limit(self, state: TaskState, run_id: str | None) -> int:
+        """The attempt limit a manual retry needs; raises ValueError if it is not allowed."""
+        task_id = state.task.id
+        try:
+            if state.status not in (TaskStatus.FAILED, TaskStatus.CANCELLED):
+                raise ValueError(
+                    f"task {task_id} is {state.status}; only a failed or cancelled task can be "
+                    "retried"
+                )
+            if state.attempt_number >= 5:
+                raise ValueError(f"task {task_id} has already used the maximum of 5 attempts")
+        except ValueError as error:
+            logger.warning("run %s task %s: retry refused: %s", run_id, task_id, error)
+            raise
+        return max(state.task.max_attempts, state.attempt_number + 1)
+
+    def _reopen(self, task_id: str) -> None:
+        state = self._states[task_id]
+        limit = self._retry_limit(state, self._run_id)
+        task = state.task.model_copy(update={"max_attempts": limit})
+        # Directly, not through _transition: leaving a final state is allowed only here.
+        self._states[task_id] = state.model_copy(
+            update={
+                "task": task,
+                "status": TaskStatus.PENDING,
+                "worker_id": None,
+                "failure_reason": None,
+                "message": "",
+                "blocked_by": None,
+            }
+        )
+        self._record(
+            task_id, TaskStatus.PENDING, f"retry was called; attempt limit is {task.max_attempts}"
+        )
+        for other, blocked in tuple(self._states.items()):
+            if blocked.status == TaskStatus.BLOCKED and blocked.blocked_by == task_id:
+                self._states[other] = blocked.model_copy(
+                    update={"status": TaskStatus.PENDING, "message": "", "blocked_by": None}
+                )
+                self._record(other, TaskStatus.PENDING, f"unblocked: retry was called on {task_id}")
+        self._wake.set()
+
+    async def retry_task(self, task_id: str) -> None:
+        """Give a failed or cancelled task of the active run one more attempt.
+
+        The tasks it blocked wait again. For a run that has finished, use
+        `recover(run_id, retry=[task_id])`.
+        """
+        if task_id not in self._states:
+            raise KeyError(task_id)
+        self._reopen(task_id)
 
     async def resume_run(self) -> None:
         """Resume what pause_run paused; a task paused by pause_task stays paused."""

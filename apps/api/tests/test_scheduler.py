@@ -1122,3 +1122,174 @@ async def test_pause_and_resume_are_logged(caplog):
         "run run task a: RUNNING (attempt 1, worker worker): worker resumed",
     ):
         assert line in caplog.messages
+
+
+def edit(task_id, **kwargs):
+    return task(task_id, allowed_operations=("edit",), **kwargs)
+
+
+async def wait_for(engine, task_id, status):
+    """Turn the loop until the task reaches `status`; a barrier, not a sleep."""
+    for _ in range(100):
+        state = by_id(engine.snapshot()).get(task_id)
+        if state is not None and state.status == status:
+            return
+        await loop_turn()
+    raise AssertionError(f"{task_id} never reached {status}")
+
+
+async def test_edit_task_waits_for_a_person_to_approve_its_diff(caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    validator = MockValidator()
+    engine = scheduler(validator=validator, review_edits=True)
+    running = asyncio.create_task(engine.run(plan(edit("a"), task("b", dependencies=("a",)))))
+    await wait_for(engine, "a", TaskStatus.AWAITING_APPROVAL)
+
+    waiting = engine.snapshot()
+    assert waiting.transitions[-1].detail == (
+        "worker reported success; waiting for a person to approve the diff"
+    )
+    assert all(worker.task_id is None for worker in waiting.workers)  # nobody is held up
+    assert not validator.started.is_set() and not running.done()
+
+    await engine.approve_task("a")
+    report = await asyncio.wait_for(running, 2)
+
+    assert report.successful
+    details = [(t.task_id, t.status, t.detail) for t in report.transitions]
+    assert ("a", TaskStatus.PENDING, "approve_task was called") in details
+    assert ("a", TaskStatus.VALIDATING, "the diff was approved; validating") in details
+    assert len([a for a in report.attempts if a.task_id == "a"]) == 1  # approval adds no attempt
+    assert (
+        "run run task a: AWAITING_APPROVAL (attempt 1, worker None): "
+        "worker reported success; waiting for a person to approve the diff" in caplog.messages
+    )
+
+
+async def test_rejected_diff_is_retried_with_the_reason_as_feedback(caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    executor = MockExecutor()
+    engine = scheduler(executor, review_edits=True)
+    running = asyncio.create_task(engine.run(plan(edit("a", max_attempts=2))))
+    await wait_for(engine, "a", TaskStatus.AWAITING_APPROVAL)
+
+    await engine.reject_task("a", "SECRET-REASON: rename the helper")
+    await loop_turn()
+    await wait_for(engine, "a", TaskStatus.AWAITING_APPROVAL)
+    await engine.approve_task("a")
+    report = await asyncio.wait_for(running, 2)
+
+    assert report.successful
+    first, second = report.attempts
+    assert first.failure_reason == FailureReason.REVIEW_REJECTED
+    assert first.message == "SECRET-REASON: rename the helper"
+    assert executor.assignments[1].previous_failure == "SECRET-REASON: rename the helper"
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == ["run run task a: attempt 1 of 2 failed (review_rejected); retrying"]
+    assert "SECRET-REASON" not in caplog.text
+
+
+async def test_rejected_diff_without_attempts_left_fails_and_blocks_dependents():
+    engine = scheduler(review_edits=True)
+    running = asyncio.create_task(engine.run(plan(edit("a"), task("b", dependencies=("a",)))))
+    await wait_for(engine, "a", TaskStatus.AWAITING_APPROVAL)
+
+    await engine.reject_task("a", "wrong file")
+    report = await asyncio.wait_for(running, 2)
+
+    states = by_id(report)
+    assert states["a"].status == TaskStatus.FAILED
+    assert states["a"].failure_reason == FailureReason.REVIEW_REJECTED
+    assert states["b"].status == TaskStatus.BLOCKED
+
+
+async def test_a_pause_never_skips_the_approval():
+    validator = MockValidator()
+    engine = scheduler(validator=validator, review_edits=True)
+    running = asyncio.create_task(engine.run(plan(edit("a"))))
+    await wait_for(engine, "a", TaskStatus.AWAITING_APPROVAL)
+
+    await engine.pause_run()
+    await engine.pause_task("a")
+    await engine.resume_run()
+    await engine.resume_task("a")
+    await loop_turn()
+    await loop_turn()
+
+    assert by_id(engine.snapshot())["a"].status == TaskStatus.AWAITING_APPROVAL
+    assert not validator.started.is_set()
+    await engine.cancel_task("a")
+    report = await asyncio.wait_for(running, 2)
+    assert by_id(report)["a"].status == TaskStatus.CANCELLED
+
+
+async def test_read_only_tasks_never_wait_and_approval_is_refused_when_not_waiting():
+    engine = scheduler(review_edits=True)
+    report = await engine.run(plan(task("a")))
+    assert report.successful
+    assert TaskStatus.AWAITING_APPROVAL not in {t.status for t in report.transitions}
+
+    with pytest.raises(ValueError, match="is not waiting for approval"):
+        await engine.approve_task("a")
+    with pytest.raises(ValueError, match="is not waiting for approval"):
+        await engine.reject_task("a", "no")
+    with pytest.raises(KeyError):
+        await engine.approve_task("nope")
+
+
+async def test_a_failed_task_is_retried_by_hand_while_the_run_goes_on():
+    gated = GatedExecutor()
+
+    class FailsOnce:
+        def __init__(self):
+            self.assignments = []
+
+        async def execute(self, assignment):
+            self.assignments.append(assignment)
+            if assignment.task.id == "a":
+                return WorkerResult(success=assignment.attempt_number > 1, message="broken")
+            return await gated.execute(assignment)
+
+    executor = FailsOnce()
+    engine = Scheduler(validator=MockValidator())
+    engine.register_worker(AgentConfig(id="w1", role="backend"), executor)
+    engine.register_worker(AgentConfig(id="w2", role="backend"), executor)
+    running = asyncio.create_task(
+        engine.run(plan(task("a"), task("b", dependencies=("a",)), task("c")))
+    )
+    await wait_for(engine, "b", TaskStatus.BLOCKED)
+
+    await engine.retry_task("a")
+    await wait_for(engine, "b", TaskStatus.RUNNING)
+    gated.gates["b"].set()
+    gated.gates["c"].set()
+    report = await asyncio.wait_for(running, 2)
+
+    assert report.successful
+    states = by_id(report)
+    assert states["a"].task.max_attempts == 2 and states["a"].attempt_number == 2
+    (second_a,) = [a for a in executor.assignments if a.task.id == "a" and a.attempt_number == 2]
+    assert second_a.previous_failure == "broken"
+    details = [(t.task_id, t.status, t.detail) for t in report.transitions]
+    assert ("a", TaskStatus.PENDING, "retry was called; attempt limit is 2") in details
+    assert ("b", TaskStatus.PENDING, "unblocked: retry was called on a") in details
+
+
+async def test_retry_is_refused_for_a_task_that_did_not_fail_and_at_the_cap(caplog):
+    engine = scheduler()
+    await engine.run(plan(task("a")))
+    with pytest.raises(ValueError, match="only a failed or cancelled task can be retried"):
+        await engine.retry_task("a")
+    with pytest.raises(KeyError):
+        await engine.retry_task("nope")
+
+    capped = scheduler(MockExecutor(result=WorkerResult(success=False)))
+    report = await capped.run(plan(task("a", max_attempts=5)))
+    assert by_id(report)["a"].status == TaskStatus.FAILED
+    with pytest.raises(ValueError, match="already used the maximum of 5 attempts"):
+        await capped.retry_task("a")
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert (
+        "run run task a: retry refused: task a has already used the maximum of 5 attempts"
+        in warnings
+    )

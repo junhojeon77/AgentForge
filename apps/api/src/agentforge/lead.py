@@ -22,7 +22,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agentforge.claude_code import READ_ONLY_TOOLS, ClaudeCall, ClaudeCodeRunner
-from agentforge.domain import Contract, Identifier, RunPlan, TaskSpec
+from agentforge.domain import Contract, Identifier, PlanRound, RunPlan, TaskSpec
 from agentforge.orchestration import validate_plan
 
 logger = logging.getLogger(__name__)
@@ -55,14 +55,6 @@ class Critique(_Strict):
 class PlanRequest(Contract):
     request: str = Field(min_length=1)
     run_id: Identifier
-
-
-class PlanRound(Contract):
-    """One round that found issues: in the check (rules) or the critique (the model)."""
-
-    revision: int  # the plan revision these issues are about; 0 is the first draft
-    source: Literal["check", "critique"]
-    issues: tuple[str, ...]
 
 
 class PlanResult(Contract):
