@@ -4,36 +4,36 @@ The goal: one lead agent coordinates specialized coding agents. Five ship by def
 can add, remove or fully customize any of them. Adding, removing and editing agent files works
 today (M2). On-screen editing is planned for M6.
 
-AgentForge is built in milestones. M1, M2, M3 and the retry and pause/resume parts of M4 are
-implemented. The rest is direction, not a promise, and not permission to start a later milestone
+AgentForge is built in milestones. M1, M2, M3 and the retry, pause/resume and persistence parts of
+M4 are implemented. The rest is direction, not a promise, and not permission to start a later milestone
 early (see [GOVERNANCE.md](GOVERNANCE.md)).
 
 | Milestone | Scope | Status |
 |---|---|---|
 | M1 | Domain contracts, deterministic scheduler, five mock workers | Implemented within [documented limits](docs/milestones/M1-domain.md) |
 | M2 | Read-only Claude Code worker, model/effort settings, session IDs, structured results, event callback, editable agent personas | Implemented within [documented limits](docs/milestones/M2-claude-code.md) |
-| M3 | One Git worktree per task, edit-capable workers that cannot run commands, recorded diffs, a validator that runs check commands | Implemented within [documented limits](docs/milestones/M3-worktrees.md) |
-| M4 | Lead orchestration, retries, pause/resume, persistence and recovery | Retries and pause/resume implemented within [documented limits](docs/milestones/M4-orchestration.md); persistence, recovery and the lead are planned |
+| M3 | One Git worktree per task, edit-capable workers that may run only their own checks, recorded diffs, a validator that runs check commands | Implemented within [documented limits](docs/milestones/M3-worktrees.md) |
+| M4 | Lead orchestration, retries, pause/resume, persistence and recovery | Retries, pause/resume, persistence and recovery implemented within [documented limits](docs/milestones/M4-orchestration.md); the lead is planned |
 | M5 | FastAPI REST commands, approvals and SSE events | Planned |
 | M6 | Tauri 2 desktop dashboard (React, TypeScript), including on-screen agent editing | Planned |
 | M7 | Integration candidates, conflict detection, review and approved integration | Planned |
 | M8 | Windows packaging, backend lifecycle, secure local communication and recovery checks | Planned |
 
-FastAPI, SQLite/SQLAlchemy/Alembic, LangGraph, Tauri and the frontend stack are planned, not
-installed. Add each only when its milestone is approved.
+SQLAlchemy and Alembic were added for M4's persistence on 2026-11-15. FastAPI, LangGraph, Tauri
+and the frontend stack are planned, not installed. Add each only when its milestone is approved.
 
 ## Deferred from M2, M3 and the built parts of M4
 
 Nothing from M2: the worker timeout, the `claude` command and the model rule were finished on
 2026-11-14 (see [the M2 doc](docs/milestones/M2-claude-code.md#finished-after-m2-2026-11-14)).
-From M3: workers running commands themselves (decided: only the task's own checks; not built), a
-sandbox or resource limits for checks, and merging worktrees back (M7). Worktree cleanup on
-request and a live check of edit mode were finished on 2026-11-14. Details are in the
+From M3: a sandbox or resource limits for checks, merging worktrees back (M7) and judging
+plain-English acceptance criteria. Worktree cleanup on request and a live check of edit mode were
+finished on 2026-11-14, and workers running their own checks on 2026-11-15. Details are in the
 [M3 doc](docs/milestones/M3-worktrees.md#not-implemented-yet).
 From M4's retries and pause/resume: a delay between attempts, a manual retry command and a pause
 that lets running work finish. Details are in the
 [M4 doc](docs/milestones/M4-orchestration.md#not-implemented-yet).
-Persistence, recovery and the lead agent are the parts of M4 still to build.
+The lead agent is the part of M4 still to build.
 
 ## Guidance for planned milestones
 
@@ -55,6 +55,17 @@ Persistence, recovery and the lead agent are the parts of M4 still to build.
   calls the existing `agentforge.personas` functions.
 
 ## Verification history
+
+Verified on 2026-11-15 after M4's persistence and recovery: **175 tests passed and 1 skipped**
+(the opt-in live Claude Code test), Ruff lint passed, and all 26 Python files passed the
+formatting check. Migrations were tested up and down on disposable databases, and a real process
+was killed mid-task and its run recovered. No live call was made for this part.
+
+Verified on 2026-11-15 after letting workers run their own checks: **168 tests passed and 1
+skipped** (the opt-in live Claude Code test), Ruff lint passed, and all 21 Python files passed the
+formatting check. Separately, four approved live calls (Claude Code 2.1.323, `claude-haiku-5-5`,
+about $0.014 in total) checked the command rules and one full run; see
+[the M3 doc](docs/milestones/M3-worktrees.md#live-check-2026-11-15-claude-code-cli-21323-workers-running-their-own-checks).
 
 Verified on 2026-11-14 after adding worktree cleanup: **163 tests passed and 1 skipped** (the
 opt-in live Claude Code test), Ruff lint passed, and all 21 Python files passed the formatting

@@ -3,8 +3,9 @@
 A local-first Windows platform where one lead agent coordinates specialized coding agents. It ships
 with five, and you can add, remove or fully customize any of them.
 
-**Status:** M1–M3 and the first two parts of M4 (task retries and pause/resume) are implemented as
-a Python library. The desktop app, REST API, persistence and the lead agent are planned, not built.
+**Status:** M1–M3 and the first three parts of M4 (task retries, pause/resume, and saved runs with
+recovery) are implemented as a Python library. The desktop app, REST API and the lead agent are
+planned, not built.
 
 ## What is AgentForge
 
@@ -20,7 +21,8 @@ What exists today is the core library (`apps/api/src/agentforge`):
 - **Scheduler:** a deterministic, in-memory async scheduler that runs a task graph on up to five
   workers at once.
 - **Workers:** five mock workers for demos and tests, plus a worker that runs the Claude Code
-  CLI. It is read-only unless a task allows edits, and it never runs commands.
+  CLI. It is read-only unless a task allows edits, and runs no commands unless a task lets it
+  run its own check commands.
 - **Worktrees:** each task can get its own Git worktree, and its diff is recorded.
 - **Validation:** a validator that runs your check commands, such as pytest, on the result.
 
@@ -69,15 +71,17 @@ flowchart LR
   Claude Code this kills the CLI process.
 - **Restricted Claude Code worker.** Each task gets one `claude -p` process limited to the Read,
   Glob and Grep tools, with a spending cap, a fresh session ID and a schema-checked result. A
-  task that allows `"edit"` adds Edit and Write. No worker can run commands.
+  task that allows `"edit"` adds Edit and Write. A task that also allows `"check"` lets the worker
+  run its own check commands, and nothing else that changes anything.
 - **One worktree per task.** Edits happen in a separate Git worktree, never in your checkout.
   AgentForge records the diff with Git instead of asking the worker what it changed.
 - **Editable personas.** Each agent is one Markdown file: its settings plus a persona that the
   Claude Code worker adds to its system prompt. Setup gives you the five defaults, and you can
   edit, add or remove agents.
 
-State is lost when the process exits. What is built and what is planned (persistence,
-the lead agent, the API and the desktop app) is in [ROADMAP.md](ROADMAP.md).
+A run can be saved to SQLite and recovered after a restart; without a store it lives in memory only.
+What is built and what is planned (the lead agent, the API and the desktop app) is in
+[ROADMAP.md](ROADMAP.md).
 
 ## Prerequisites
 
@@ -188,7 +192,12 @@ from agentforge.worktrees import WorktreeExecutor
 
 The worker edits `C:\path\to\worktrees\r1\t1\1` (run, task, attempt), not your checkout. Afterwards
 `report.attempts[0].result.diff` holds the change, and the task completes only if pytest exits 0
-there. The worktree is kept. When the run is finished and reviewed, delete all of its worktrees:
+there. To let the worker run that check itself while it works, add `"check"` to
+`allowed_operations` and give the executor the same mapping:
+`ClaudeCodeExecutor(command=..., checks={"unit": ("python", "-m", "pytest")})`. AgentForge still
+runs the check itself afterwards.
+
+The worktree is kept. When the run is finished and reviewed, delete all of its worktrees:
 
 ```powershell
 .\.venv\Scripts\python.exe -m agentforge clean r1 --repo C:\path\to\some\repo --root C:\path\to\worktrees
@@ -243,7 +252,24 @@ not use up a retry. `run()` does not return while anything is paused, and `resum
 task you paused with `pause_task` paused. Limits, such as a file left half-written by the kill,
 are in [the M4 doc](docs/milestones/M4-orchestration.md#limits).
 
-### 7. Verify
+### 7. Save a run and recover it after a restart
+
+Pass a store, and every step of the run is saved to SQLite as it happens:
+
+```python
+from agentforge.store import RunStore, default_path
+
+    scheduler = Scheduler(validator=..., store=RunStore(default_path()))
+```
+
+If the process stops mid-run, start a new one, register the same workers, and call
+`scheduler.recover("r1")` as an asyncio task. Work that was in flight comes back paused, so
+nothing billed starts until you call `await scheduler.resume_run()`; it then continues the same
+attempt in the same worktree. `RunStore(default_path()).unfinished_runs()` lists runs to recover.
+The database holds diffs and failure messages, so treat it like the report. Details are in
+[the M4 doc](docs/milestones/M4-orchestration.md#delivered-behavior-persistence-and-recovery).
+
+### 8. Verify
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest apps/api/tests
@@ -300,5 +326,5 @@ app (M6), which will call these same functions.
   outcome mapping, the live check, the timeout and the `claude` command.
 - [M3: worktrees and validation](docs/milestones/M3-worktrees.md): worktrees, edit mode, diffs,
   check commands, risks and deferred work.
-- [M4: retries and pause/resume](docs/milestones/M4-orchestration.md): retry rules, pause and
+- [M4: retries, pause/resume and saved runs](docs/milestones/M4-orchestration.md): retry rules, pause and
   resume, how to debug a run, limits and the M4 parts still planned.

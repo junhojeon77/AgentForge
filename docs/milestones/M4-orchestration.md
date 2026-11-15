@@ -1,15 +1,16 @@
 # M4 — Retries, pause/resume, persistence and the lead agent
 
-M4 is built in four parts. The first two are implemented.
+M4 is built in four parts. The first three are implemented.
 
 | Part | Status |
 |---|---|
 | Retries | Implemented (this document) |
 | Pause/resume | Implemented (this document) |
-| Persistence and recovery | Planned |
+| Persistence and recovery | Implemented (this document) |
 | Lead orchestration | Planned |
 
-No new dependency was added for either part.
+Retries and pause/resume added no dependency. Persistence added SQLAlchemy 2 and Alembic, as
+the roadmap planned; SQLite itself is part of Python.
 
 ## Delivered behavior: retries
 
@@ -84,6 +85,47 @@ Three approved calls in a scratch folder, with the read-only flag set AgentForge
 Not confirmed live: resuming an edit-mode session, resuming a session killed in the middle of a
 model reply or a file edit, and starting a session under an id whose resume just failed.
 
+## Delivered behavior: persistence and recovery
+
+A run can be saved as it happens and continued after the process stops, for example after a
+crash or a restart. Saving is opt-in: without a store nothing changes.
+
+```python
+from agentforge.store import RunStore, default_path
+
+scheduler = Scheduler(validator=..., store=RunStore(default_path()))  # %APPDATA%\AgentForge\runs.db
+report = await scheduler.run(plan)          # every transition is saved as it happens
+```
+
+After a restart, register the same workers again and recover the run:
+
+```python
+store = RunStore(default_path())
+print(store.unfinished_runs())              # e.g. ["r1"]
+scheduler = Scheduler(validator=..., store=store)
+...                                         # register_worker(...) as before
+recovering = asyncio.create_task(scheduler.recover("r1"))
+await scheduler.resume_run()                # nothing billed starts before this
+report = await recovering
+```
+
+1. `RunStore(path)` opens a SQLite file and migrates it to the latest schema with Alembic.
+2. Every transition is saved in one transaction with the task's state and its latest attempt,
+   at the moment it happens, so the database always matches the report.
+3. `recover(run_id)` loads the run. A task whose worker was in flight (`ASSIGNED`, `RUNNING` or
+   `VALIDATING`) becomes `PAUSED` with the reason `recovered after a restart while RUNNING`;
+   `READY` tasks go back to `PENDING`; finished tasks stay as they were.
+4. `resume_run()` continues the recovered tasks exactly like a pause: the same attempt, on the
+   same worker, in the same worktree, with `claude --resume` (or a fresh session in the same
+   folder when none was saved). A task paused by hand before the restart stays paused until
+   `resume_task`.
+5. If a save fails, the run stops: every unfinished task is cancelled with the reason
+   `saving the run failed (OperationalError)`, and `run()` raises the error. A run that cannot
+   be recorded does not keep spending.
+
+The crash test kills a real process in the middle of a task and recovers the run in a fresh
+`Scheduler`.
+
 ## Contract
 
 | Item | Behavior |
@@ -99,6 +141,10 @@ model reply or a file edit, and starting a session under an id whose resume just
 | `Transition.detail` | Why the transition happened. Never empty; the texts are listed under [How to debug a run](#how-to-debug-a-run) |
 | `RunReport.attempts` | Every attempt of every task, in dispatch order. A paused and resumed attempt is one entry |
 | `WorktreeExecutor` path | `root/<run_id>/<task_id>/<attempt>` (was `root/<run_id>/<task_id>` in M3). An existing path is reused only when `Assignment.resume` is set |
+| `RunStore(path)` | Opens or creates the SQLite file and migrates it. `start_run(plan)`, `save(...)`, `load(run_id)` (the plan and the report without workers, or `None`) and `unfinished_runs()` (ids, oldest first). `agentforge.store.default_path()` is `%APPDATA%\AgentForge\runs.db` |
+| `Scheduler(..., store=None)` | With a store, `run()` saves every transition. A run id is saved once: `run()` with an id already saved raises `ValueError` before anything starts |
+| `await recover(run_id)` | Continues a saved, unfinished run and returns its report. Raises `ValueError` without a store, for an unknown or finished run, while a run is active, or when an unfinished attempt's worker is not registered |
+| Database tables | `runs` (the plan as JSON), `tasks` (`TaskState` as JSON, plus its status), `attempts` (`TaskAttempt` as JSON, in dispatch order), `transitions` (sequence, task, status, detail). JSON is checked with the same Pydantic contracts on load |
 
 ## How to debug a run
 
@@ -114,21 +160,23 @@ The report answers these after the run, with no logging set up:
 | Was the attempt continued or started again? | The `ASSIGNED` transition says `resumed on worker …` or `assigned to worker …` |
 | Why is the task in its final state? | `TaskState.message`: the failure message, `blocked by a, which is FAILED`, or who cancelled it. Also `failure_reason`, `blocked_by` and `attempt_number` |
 | Why did the task change status? | `Transition.detail` on every transition; see the table below |
+| What happened before a crash? | `RunStore(path).load(run_id)`: everything up to the last saved transition |
+| Why did a run stop with a database error? | Every unfinished task's message: `saving the run failed (OperationalError)`; the error itself is raised from `run()` |
 
 Every transition says why it happened:
 
 | Status | `Transition.detail` |
 |---|---|
-| `PENDING` | `queued`, or after a pause `resume_task was called` / `resume_run was called` |
+| `PENDING` | `queued`, or after a pause `resume_task was called` / `resume_run was called`, or `recovered after a restart` for a task that was `READY` |
 | `READY` | `no unfinished dependencies`, or after a failed attempt `attempt 1 of 3 failed (validation_rejected); retrying` |
 | `ASSIGNED` | `attempt 1 of 3 assigned to worker backend`, or `attempt 1 of 3 resumed on worker backend` |
 | `RUNNING` | `worker started` or `worker resumed` |
 | `VALIDATING` | `worker reported success; validating`, or `validating again after a pause` |
 | `COMPLETED` | `validation accepted` |
-| `PAUSED` | `pause_task was called while RUNNING` or `pause_run was called while PENDING`: who paused it and the status it had. `pause_task was called while PAUSED`: a task held by `pause_run` was then paused by hand |
+| `PAUSED` | `pause_task was called while RUNNING` or `pause_run was called while PENDING`: who paused it and the status it had. `recovered after a restart while RUNNING`: the process stopped while its worker was in flight. `pause_task was called while PAUSED`: a task held by `pause_run` was then paused by hand |
 | `FAILED` | `attempt 3 of 3 failed (validation_rejected); no attempts left`, or `…; not retried: validator errors are setup problems` |
 | `BLOCKED` | `blocked by a, which is FAILED` or `blocked by a, which is CANCELLED`. `a` is the task that failed or was cancelled, not necessarily a direct dependency |
-| `CANCELLED` | `cancel_task was called`, `cancel_run was called`, `run() stopped by CancelledError` (the type of the error that ended `run()`), or `worker task was cancelled` (the asyncio task was cancelled from outside the scheduler) |
+| `CANCELLED` | `cancel_task was called`, `cancel_run was called`, `saving the run failed (OperationalError)`, `run() stopped by CancelledError` (the type of the error that ended `run()`), or `worker task was cancelled` (the asyncio task was cancelled from outside the scheduler) |
 
 For `PAUSED`, `BLOCKED` and `CANCELLED` the same text is in `TaskState.message`, and a paused or
 cancelled attempt has it in `TaskAttempt.message`. Both are cleared when the task is resumed.
@@ -145,7 +193,8 @@ logging.basicConfig(level=logging.DEBUG)
 | Logger | Level | Event |
 |---|---|---|
 | `agentforge.orchestration` | DEBUG | Every transition: run, task, status, attempt number, worker and the `Transition.detail` text, e.g. `run r1 task a: PAUSED (attempt 1, worker None): pause_task was called while RUNNING` |
-| `agentforge.orchestration` | WARNING | A failed attempt, with the same text as `Transition.detail` |
+| `agentforge.orchestration` | WARNING | A failed attempt, with the same text as `Transition.detail`; `saving the run failed (OperationalError); stopping the run` (the error type only); `recovery refused:` and the reason (ids only) |
+| `agentforge.store` | DEBUG | A store opened: path and schema version |
 | `agentforge.worktrees` | DEBUG | A worktree created (path and commit) or reused for a resumed attempt; a diff recorded (length only); a worktree removed by `remove_run` (path) |
 | `agentforge.worktrees` | WARNING | `remove_run` kept a folder that Git does not know as a worktree (path only; Git's message is in the raised error) |
 | `agentforge.claude_code` | DEBUG | A Claude process started or resumed (task, attempt, session id, folder, tools) and finished (exit code, result subtype) |
@@ -182,14 +231,21 @@ because those can contain secrets. Read those in the report.
   reuses. The attempt then fails as an `EXECUTOR_EXCEPTION` and follows the retry rules.
 - **A resumed task waits for the worker that started it**, even when another worker of the role
   is free, because the session began under that worker's model and persona.
-- **Pauses are lost when the process exits**, like all other state, until the persistence part.
+- **Without a store, everything is lost when the process exits**, pauses included.
+- **The database holds secrets the report holds**: diffs, failure messages and check output.
+  It lives under your user profile; nothing from it is logged.
+- **Saving blocks the event loop** for one small SQLite write per transition, which is fine at
+  five workers (marked `shortcut:` in the code).
+- **Workers and their executors are not saved.** Register the same workers before `recover`.
+- **A crash mid-step is like a pause mid-step:** a file being written may be left half-written,
+  and what was spent is spent.
+- **The CLI and the demo do not save runs.** Only code that passes a store does.
 - `resume_run` resumes tasks in id order; they are then dispatched by the normal rules.
 
 ## Not implemented yet
 
 | Deferred | Waits for |
 |---|---|
-| Saving runs and recovering after a restart, including paused tasks | M4, persistence part |
 | The lead agent that turns a request into a `RunPlan` | M4, last part |
 | A pause that lets running work finish first | When wanted; today a pause always stops the worker |
 | A delay or backoff between attempts | When a real rate-limit failure shows the need |
@@ -216,6 +272,11 @@ Run the pytest and Ruff commands in the root README. The M4 tests cover:
   limits, the fresh-session fallback and its warning, no fallback for other failures, a rejected
   batch-file launcher, a CLI that exits before it reads its prompt, and a skipped non-JSON
   output line that is logged by length only.
+- `test_store.py`: migrations up and down on a disposable database, a saved run loading back
+  equal to the report, a run id saved once, a real process killed mid-task and recovered (the
+  task paused with its reason, then the same attempt and session continued), recovery refused
+  for an unknown, finished or active run or a missing worker, and a failed save stopping the
+  run with its reason and a WARNING that holds no error text.
 - `test_worktrees.py`: a diff that includes files in ignored paths; a full run in which a real
   check fails once and the second attempt runs
   in a fresh worktree; a resumed attempt reusing its worktree; and a full run in which a paused

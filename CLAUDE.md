@@ -5,7 +5,7 @@ This file gives instructions to AI coding assistants working on this project.
 ## Project Overview
 
 AgentForge is a planned local-first Windows platform where one lead agent coordinates specialized
-coding agents: five by default, and users can add, remove or fully customize any of them. M1–M3 and M4's retries and pause/resume are implemented as a Python library in `apps/api/src/agentforge`.
+coding agents: five by default, and users can add, remove or fully customize any of them. M1–M3 and M4's retries, pause/resume and saved runs are implemented as a Python library in `apps/api/src/agentforge`.
 Everything else is planned. Keep AI reasoning separate from deterministic scheduling, validation,
 permissions and human approval.
 
@@ -85,8 +85,8 @@ Python 3.11+, from the repository root in PowerShell:
 ```
 
 The demo, setup, single-test and opt-in live test commands are in
-[CONTRIBUTING.md](CONTRIBUTING.md#commands). No type checker, frontend build, migrations or CI
-exist yet; don't invent commands for them.
+[CONTRIBUTING.md](CONTRIBUTING.md#commands), with the command for writing a new database migration.
+No type checker, frontend build or CI exists yet; don't invent commands for them.
 
 ## Docs
 

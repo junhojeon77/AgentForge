@@ -36,7 +36,16 @@ $env:AGENTFORGE_CLAUDE = "$env:USERPROFILE\.vscode\extensions\anthropic.claude-c
 
 Pytest config lives in `apps/api/pyproject.toml` and sets `asyncio_mode = "auto"`, so async tests
 need no marker. Ruff targets py311 with line length 100 and rules `E F I UP B ASYNC`. There is no
-type checker, frontend build, migration tool or CI yet.
+type checker, frontend build or CI yet.
+
+Database migrations live in `apps/api/src/agentforge/migrations/versions/`. `RunStore` applies them
+itself. To write a new one after changing the tables in `store.py`:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic -c apps/api/alembic.ini revision -m "what changes"
+```
+
+Test every migration up and down on a disposable database, as `test_store.py` does.
 
 ## Workflow
 
@@ -73,7 +82,8 @@ and say in the PR which documents changed.
 
 The code is a library, not a service: immutable contracts, a deterministic in-memory async
 scheduler, mock workers, a Claude Code worker, Git worktrees, a command validator and editable
-agent personas, all in `apps/api/src/agentforge`. State is lost when the process exits.
+agent personas and an optional SQLite run store, all in `apps/api/src/agentforge`. Without a store,
+state is lost when the process exits.
 
 - **`domain.py`: contracts.** Every model extends `Contract` (Pydantic, `frozen=True`,
   `extra="forbid"`, `revalidate_instances="always"`); collections are tuples. `Identifier` (ids,
@@ -150,8 +160,10 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
 - **`claude_code.py`: `ClaudeCodeExecutor`.** Runs one `claude -p --output-format stream-json`
   process per task in the task's `workspace_reference` folder, read-only (`--tools
   Read,Glob,Grep --permission-prompts none --restricted --strict-mcp-config`), or with
-  `Edit,Write` and `--permission-mode acceptEdits` added when the task allows `"edit"`. It
-  never gets a tool that runs commands. The prompt goes
+  `Edit,Write` and `--permission-mode acceptEdits` added when the task allows `"edit"`. A task
+  that also allows `"check"` gets `Bash` with `--permission-mode dontAsk` and one exact
+  `--allowedTools "Bash(<command>)"` rule per check, built from the executor's `checks` mapping
+  (`_check_commands`); otherwise it never gets a tool that runs commands. The prompt goes
   on stdin, a fresh `--session-id`, `--effort`/`--model` from `AgentConfig`, the persona as
   `--append-system-prompt`, the `WorkerResult` schema via `--json-schema`, and a
   `--max-budget-usd` cap. Every event goes to `on_event`; the final `result.structured_output`
@@ -175,6 +187,13 @@ agent personas, all in `apps/api/src/agentforge`. State is lost when the process
   that is being resumed after a pause. `remove_run(repo, root, run_id)` deletes every worktree
   of a finished run on request; a folder Git does not know as a worktree is kept and named in
   the error.
+- **`store.py`: `RunStore`.** SQLite through SQLAlchemy Core: tables `runs`, `tasks`, `attempts`
+  and `transitions`. Contracts are stored as JSON and validated with Pydantic on load, so
+  `domain.py` stays the one definition. Opening a store runs the Alembic migrations in
+  `migrations/` (`env.py` uses the store's connection, or the URL in `apps/api/alembic.ini`
+  when run from the command line). `Scheduler._record` calls `save()` on every transition;
+  a failed save sets `_store_error`, which `_drive()` raises, cancelling the run. `recover()`
+  loads a run, pauses in-flight tasks through the pause path and adds them to `_run_paused`.
 - **`validation.py`: `CommandValidator`.** Runs each `check:<name>` constraint as a configured
   argv (no shell) in the result's workspace with a timeout. It rejects on a non-zero exit, a
   timeout or an unknown check, and never reads the worker's `passed_checks`. Timeout and
@@ -203,6 +222,8 @@ Tests are in `apps/api/tests/`:
   `fixtures/claude_stream.jsonl` (a trimmed live recording). Its live test is opt-in.
 - `test_worktrees.py`: worktrees and diffs in disposable Git repositories, plus full
   edit → diff → check runs with the fake Claude, one of them retried after a failing check.
+- `test_store.py`: saved runs, migrations and recovery on disposable databases. `crash_run.py` is a
+  run that the crash test kills mid-task in a real subprocess.
 - `test_validation.py`: the command validator. Its `hanging` fixture is a check that reports
   its pid over a local socket, a barrier for the timeout and cancellation tests.
 

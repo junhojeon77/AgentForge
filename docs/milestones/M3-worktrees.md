@@ -5,8 +5,8 @@
 A worker can now change code without touching your checkout:
 
 1. `agentforge.worktrees.WorktreeExecutor` gives each task its own Git worktree.
-2. A task that allows `"edit"` lets the Claude Code worker edit files there. It still cannot run
-   commands.
+2. A task that allows `"edit"` lets the Claude Code worker edit files there. A task that also
+   allows `"check"` lets it run its own check commands, and no other command (added 2026-11-15).
 3. AgentForge records the diff itself, with Git, after the worker finishes.
 4. `agentforge.validation.CommandValidator` runs the task's check commands in the worktree. It
    ignores what the worker claims to have checked.
@@ -24,6 +24,8 @@ No new dependency was added; Git and `asyncio` subprocesses do the work. The sch
 | `worktrees.remove_run(repo, root, run_id)` | Deletes every worktree under `root/<run_id>` (all tasks, all attempts) with `remove`, then the empty folders, and returns the removed paths. Nothing calls it automatically; call it after the run has finished. A folder Git does not know as a worktree is left in place and named in a `RuntimeError`, after the real worktrees are removed. The run id must be a safe id |
 | `python -m agentforge clean <run_id> --repo <repo> --root <root>` | The same from the command line: prints each removed path. Exit 1 when a folder was kept, 2 for an unsafe run id |
 | `TaskSpec.allowed_operations` | `"edit"` gives the Claude Code worker `--tools Read,Glob,Grep,Edit,Write` and `--permission-mode acceptEdits`. Without it the worker is read-only, as in M2 |
+| `"check"` in `allowed_operations` | Needs `"edit"` too. For each `check:<name>` constraint the worker gets the `Bash` tool and one exact rule, `--allowedTools Edit Write "Bash(<command>)"`, in `--permission-mode dontAsk`, which refuses every command without a rule. The prompt lists the exact commands. AgentForge still runs every check itself afterwards and ignores what the worker ran |
+| `ClaudeCodeExecutor(..., checks={name: argv})` | The same mapping `CommandValidator` gets. The command line is `shlex.join(argv)`. A `"check"` task whose check has no command, or whose command contains `*`, `(` or `)` (rule syntax, a `*` would widen the rule), raises `ValueError` before Claude starts |
 | `WorkerResult.workspace`, `WorkerResult.diff` | Set by `WorktreeExecutor`, never by the model; both are left out of the schema the model fills in |
 | `CommandValidator(checks={name: argv}, timeout=600)` | For each `check:<name>` in `TaskSpec.execution_constraints`, runs `argv` (no shell) in `result.workspace`, or in `task.workspace_reference` when that is unset |
 
@@ -51,6 +53,11 @@ Outcome mapping:
   tool-configuration files, and `--permission-prompts none` denies anything that would prompt.
   The [live check](#live-check-2026-11-14-claude-code-cli-21323) below confirmed this for two
   writes; it is not proof for every path or every CLI version.
+- **A `"check"` worker can also run commands the CLI counts as read-only**, inside its folder
+  (seen: `cat`, `ls`, `git status`, `git diff`; see the live check below). Its own checks run
+  code it wrote, with your user rights, like the validator's.
+- **Files a check run creates show up in the diff.** The diff includes ignored paths, so a
+  worker's test run can add files such as `__pycache__/*.pyc` to it.
 - An `"edit"` task run without `WorktreeExecutor` edits `workspace_reference` in place.
 - Worktrees are kept after a run, for validation and review. Nothing removes them automatically,
   by decision: `worktrees.remove_run` or `python -m agentforge clean` deletes a finished run's
@@ -82,11 +89,34 @@ never ran, which is the intended order.
 Not confirmed live: reading a file outside the worktree, edits by other models, resuming an
 edit-mode session, and a retry of an edit task.
 
+## Live check (2026-11-15, Claude Code CLI 2.1.323): workers running their own checks
+
+Four approved calls with `claude-haiku-5-5`, about $0.014 in total.
+
+Three probes ran the CLI directly with `--tools ...,Bash` and one exact rule,
+`--allowedTools "Bash(python check.py)"`, and asked the worker to try other commands. Marker files
+showed what really ran.
+
+- In `acceptEdits` mode the exact command ran, but so did `touch`, `echo hi > file`,
+  `git status` and `whoami`, none of them allowed. That mode approves file commands on its own.
+- In `dontAsk` mode, which AgentForge uses for `"check"` tasks, the exact command ran. Refused:
+  the same command with an extra argument, another script, `&&` and `;` chains, `touch`,
+  `echo > file`, `sort -o`, `find -exec`, `python -c`, a `git` alias that runs a program,
+  `printenv` and `echo $VAR`, and `cat`, `head` and `grep` of a file outside the folder.
+- Still ran without a rule, in `dontAsk` mode: commands the CLI counts as read-only, inside the
+  folder: `cat` of a file there, `ls`, `pwd`, `date`, `whoami`, `git status`, `git log`,
+  `git diff` and `git config --get`. They read what the worker's Read, Glob and Grep tools can
+  already read. This list is what was seen, not a complete list.
+
+One end-to-end call through `WorktreeExecutor`, `ClaudeCodeExecutor(checks=...)` and
+`CommandValidator`: the worker ran its check, saw it fail, fixed the code, ran the check again
+and reported success; its extra `python -c` command was refused; AgentForge's own check then
+accepted the task.
+
 ## Not implemented yet
 
 | Deferred | Waits for |
 |---|---|
-| Workers running commands (tests, builds) themselves | Decided on 2026-11-14: a worker may run only its own task's checks, nothing else. Not built yet. Until then only the validator runs commands |
 | Merging worktrees back | M7 (integration) |
 | Checking natural-language acceptance criteria | Later; the validator runs commands only |
 
@@ -104,4 +134,6 @@ pytest temp folder. They cover:
 - `test_validation.py`: passing, failing and unknown checks, false worker claims, which
   workspace is used, a missing workspace, and a timeout and a cancellation that kill the check.
 - `test_claude_code.py`: an `"edit"` task gets the edit flags and prompt; other tasks stay
-  read-only.
+  read-only. A `"check"` task gets the shell tool, `dontAsk` and one exact rule per check, the
+  commands in its prompt and only check names in the log; one that cannot be limited (no
+  `"edit"`, a check with no command, a `*` in a command) never starts a process.

@@ -96,10 +96,10 @@ keep cancellation waiting. A task can set `timeout_seconds` to stop a worker tha
 all scheduler methods from the same event loop, not arbitrary threads. Worker reservations are
 released on every completed cleanup path, including cancellation before a coroutine starts.
 
-Retries and pause/resume (the `PAUSED` status) were added in [M4](M4-orchestration.md).
-Reactivation of blocked tasks, durable checkpoints, and restart recovery are still planned for M4.
+Retries, pause/resume (the `PAUSED` status), saved runs and restart recovery were added in
+[M4](M4-orchestration.md). Reactivation of blocked tasks is not planned.
 Duplicate prevention applies within a live run; reusing a plan in a later run executes it again.
-There are no restart or exactly-once guarantees.
+There are no exactly-once guarantees: a step interrupted by a crash may run again when resumed.
 
 ## Acceptance checks
 
