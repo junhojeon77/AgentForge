@@ -21,6 +21,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m agentforge claude "<task>"       # one read-only Claude Code task (billed)
 .\.venv\Scripts\python.exe -m agentforge plan "<request>"      # lead agent: print a task plan (billed)
 .\.venv\Scripts\python.exe -m agentforge clean <run_id> --repo <repo> --root <root>  # delete a finished run's worktrees
+.\.venv\Scripts\python.exe -m agentforge serve --worktrees <dir> [--check name=command]   # local API on 127.0.0.1:8765
 .\.venv\Scripts\python.exe -m pytest apps/api/tests          # all tests
 .\.venv\Scripts\python.exe -m pytest apps/api/tests/test_scheduler.py::test_empty_plan   # single test
 .\.venv\Scripts\python.exe -m ruff check apps/api
@@ -216,13 +217,25 @@ state is lost when the process exits.
   file name must equal the id, on load and on save. `setup(folder)` copies the shipped
   `default_personas/*.md` only into a folder with no personas, so it never overwrites edits or
   restores removed agents. `save_agent` writes a temp file, then `os.replace`. `load_agents`
-  raises `ValueError` naming the bad file. M5/M6 will call these functions; there is no API or UI
-  yet.
+  raises `ValueError` naming the bad file. M6 will call these functions; the M5 API does not
+  expose them yet.
+- **`api.py`: the local REST API (M5).** `create_app(settings, workers=, validator=)` builds
+  the FastAPI app; tests pass mock workers. A token dependency guards every route with
+  `secrets.compare_digest`. `_Server` holds the store, the one active run (`launch` starts it
+  as an asyncio task and turns an early `ValueError` into a 400) and the event-stream queues
+  that `Scheduler(on_transition=...)` feeds. `_granted` applies the rights a person gives on
+  approval; every task defaults to read-only. `serve` runs uvicorn on 127.0.0.1 only.
+  The scheduler side: `AWAITING_APPROVAL` (set in `_execute` when `review_edits` is on),
+  `approve_task` (re-dispatches the attempt, whose result makes `_execute` validate only),
+  `reject_task` (through `_fail`), and `retry_task`/`recover(retry=...)` (`_reopen`, the only
+  way out of a final status). `_hold` leaves a waiting task alone so a pause never skips an
+  approval.
 - **`__main__.py`**: `cli()` parses the command line with `argparse`. No arguments runs the
   mock five-task demo (`main()`); `setup` creates the persona folder at `default_folder()`;
   `claude "<task>"` runs one read-only task with `ClaudeCodeExecutor` for every agent in the
   persona folder (or the defaults) and prints the report. A missing folder or an unknown role
   stops it before Claude starts. `clean <run_id> --repo --root` calls `worktrees.remove_run`.
+  `serve` writes a new token file and starts `api.serve`; it imports the web stack only then.
 
 Tests are in `apps/api/tests/`:
 - `test_contracts.py`: contract validation and immutability.
@@ -237,10 +250,13 @@ Tests are in `apps/api/tests/`:
   list, one reply per call.
 - `test_store.py`: saved runs, migrations and recovery on disposable databases. `crash_run.py` is a
   run that the crash test kills mid-task in a real subprocess.
+- `test_api.py`: the REST API through FastAPI's `TestClient` with mock workers; `until()` asks
+  for the report until a state is reached, each request letting the server's loop run.
 - `test_validation.py`: the command validator. Its `hanging` fixture is a check that reports
   its pid over a local socket, a barrier for the timeout and cancellation tests.
 
 Delivered contracts and limits are in [M1-domain.md](docs/milestones/M1-domain.md),
 [M2-claude-code.md](docs/milestones/M2-claude-code.md),
-[M3-worktrees.md](docs/milestones/M3-worktrees.md) and
-[M4-orchestration.md](docs/milestones/M4-orchestration.md).
+[M3-worktrees.md](docs/milestones/M3-worktrees.md),
+[M4-orchestration.md](docs/milestones/M4-orchestration.md) and
+[M5-api.md](docs/milestones/M5-api.md).

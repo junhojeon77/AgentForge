@@ -97,7 +97,8 @@ all scheduler methods from the same event loop, not arbitrary threads. Worker re
 released on every completed cleanup path, including cancellation before a coroutine starts.
 
 Retries, pause/resume (the `PAUSED` status), saved runs and restart recovery were added in
-[M4](M4-orchestration.md). Reactivation of blocked tasks is not planned.
+[M4](M4-orchestration.md). The `AWAITING_APPROVAL` status, approvals and a manual retry, which
+can reopen a finished task, were added in [M5](M5-api.md). Reactivation of blocked tasks is not planned.
 Duplicate prevention applies within a live run; reusing a plan in a later run executes it again.
 There are no exactly-once guarantees: a step interrupted by a crash may run again when resumed.
 

@@ -14,26 +14,28 @@ early (see [GOVERNANCE.md](GOVERNANCE.md)).
 | M2 | Read-only Claude Code worker, model/effort settings, session IDs, structured results, event callback, editable agent personas | Implemented within [documented limits](docs/milestones/M2-claude-code.md) |
 | M3 | One Git worktree per task, edit-capable workers that may run only their own checks, recorded diffs, a validator that runs check commands | Implemented within [documented limits](docs/milestones/M3-worktrees.md) |
 | M4 | Lead orchestration, retries, pause/resume, persistence and recovery | Retries, pause/resume, persistence and recovery implemented within [documented limits](docs/milestones/M4-orchestration.md); the lead agent implemented on 2026-11-15 |
-| M5 | FastAPI REST commands, approvals and SSE events | Planned |
+| M5 | FastAPI REST commands, approvals and SSE events | Implemented within [documented limits](docs/milestones/M5-api.md) on 2026-11-15 |
 | M6 | Tauri 2 desktop dashboard (React, TypeScript), including on-screen agent editing | Planned |
 | M7 | Integration candidates, conflict detection, review and approved integration | Planned |
 | M8 | Windows packaging, backend lifecycle, secure local communication and recovery checks | Planned |
 
 SQLAlchemy and Alembic were added for M4's persistence, and LangGraph and LangChain core for the
-lead agent, on 2026-11-15. FastAPI, Tauri and the frontend stack are planned, not installed. Add each only when its milestone is approved.
+lead agent, and FastAPI and uvicorn for M5, on 2026-11-15. Tauri and the frontend stack are
+planned, not installed. Add each only when its milestone is approved.
 
-## Deferred from M2, M3 and the built parts of M4
+## Deferred from built milestones
 
 Nothing from M2: the worker timeout, the `claude` command and the model rule were finished on
 2026-11-14 (see [the M2 doc](docs/milestones/M2-claude-code.md#finished-after-m2-2026-11-14)).
-From M3: a sandbox or resource limits for checks, merging worktrees back (M7) and judging
-plain-English acceptance criteria. Worktree cleanup on request and a live check of edit mode were
+From M3: merging worktrees back (M7) and judging plain-English acceptance criteria; a sandbox
+or resource limits for checks are listed under the M3 doc's limits. Worktree cleanup on request and a live check of edit mode were
 finished on 2026-11-14, and workers running their own checks on 2026-11-15. Details are in the
 [M3 doc](docs/milestones/M3-worktrees.md#not-implemented-yet).
-From M4's retries and pause/resume: a delay between attempts, a manual retry command and a pause
-that lets running work finish. Details are in the
+From M4: a delay between attempts and a pause that lets running work finish. The manual retry
+command and running a plan from a request came with M5. Details are in the
 [M4 doc](docs/milestones/M4-orchestration.md#not-implemented-yet).
-All four parts of M4 are built.
+From M5: agent persona endpoints (M6) and several runs at once. Details are in the
+[M5 doc](docs/milestones/M5-api.md#not-implemented-yet).
 
 ## Guidance for planned milestones
 
@@ -57,6 +59,11 @@ All four parts of M4 are built.
   calls the existing `agentforge.personas` functions.
 
 ## Verification history
+
+Verified on 2026-11-15 after M5: **222 tests passed and 1 skipped** (the opt-in live Claude
+Code test), Ruff lint passed, and all 31 Python files passed the formatting check. The real
+server was started with uvicorn in a scratch profile: 401 without the token, the right answer
+with it, a plan saved as pending, a clean stop. No billed call was made for M5.
 
 Verified on 2026-11-15 after adding the lead agent: **184 tests passed and 1 skipped** (the opt-in
 live Claude Code test), Ruff lint passed, and all 28 Python files passed the formatting check.

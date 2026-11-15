@@ -46,8 +46,10 @@ Outcome mapping:
 ## Limits and risks
 
 - **Worktrees isolate changes, not execution.** A check such as pytest runs code the worker just
-  wrote, with your user rights and environment. There is no sandbox, resource limit or approval
-  step yet; approvals are planned for M5.
+  wrote, with your user rights and environment. There is no sandbox or resource limit. Since
+  [M5](M5-api.md) the API makes a person approve each diff before its checks run
+  (`Scheduler(review_edits=True)`); a `"check"` task's worker has already run its own checks by
+  then.
 - **Edit mode was checked live once, with one model.** `--restricted` confines the file tools
   to the working folder and lets only a person approve writes to settings, Git and
   tool-configuration files, and `--permission-prompts none` denies anything that would prompt.
@@ -119,6 +121,7 @@ accepted the task.
 |---|---|
 | Merging worktrees back | M7 (integration) |
 | Checking natural-language acceptance criteria | Later; the validator runs commands only |
+| A sandbox or resource limits for checks | A sandbox decision; see Limits |
 
 ## Acceptance checks
 

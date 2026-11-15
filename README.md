@@ -3,9 +3,9 @@
 A local-first Windows platform where one lead agent coordinates specialized coding agents. It ships
 with five, and you can add, remove or fully customize any of them.
 
-**Status:** M1–M4 are implemented as a Python library: workers, worktrees, retries,
-pause/resume, saved runs with recovery, and a lead agent that turns a request into a plan. The
-REST API and the desktop app are planned, not built.
+**Status:** M1–M5 are implemented: a Python library (workers, worktrees, retries,
+pause/resume, saved runs with recovery, a lead agent that turns a request into a plan) and a
+local REST API with approvals and live events. The desktop app is planned, not built.
 
 ## What is AgentForge
 
@@ -283,7 +283,20 @@ revises them, then prints the plan as JSON. It does not run it, and every task i
 you give it rights. Each plan is billed: up to six short Claude sessions by default. Details are in
 [the M4 doc](docs/milestones/M4-orchestration.md#delivered-behavior-the-lead-agent).
 
-### 9. Verify
+### 9. Run the local API
+
+```powershell
+.\.venv\Scripts\python.exe -m agentforge serve --worktrees C:\path\to\worktrees --check unit="python -m pytest"
+```
+
+The server listens on `127.0.0.1:8765` only and writes a new token to
+`%APPDATA%\AgentForge\api-token` at each start; send it as `Authorization: Bearer <token>`.
+Propose a plan (`POST /proposals`, or `/proposals/from-request` for the lead agent), approve it
+with the rights each task gets, then approve each worker's diff before its checks run, and
+follow it all on `GET /runs/{id}/events`. Endpoints and limits are in
+[the M5 doc](docs/milestones/M5-api.md).
+
+### 10. Verify
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest apps/api/tests
@@ -340,5 +353,7 @@ app (M6), which will call these same functions.
   outcome mapping, the live check, the timeout and the `claude` command.
 - [M3: worktrees and validation](docs/milestones/M3-worktrees.md): worktrees, edit mode, diffs,
   check commands, risks and deferred work.
+- [M5: local REST API, approvals and live events](docs/milestones/M5-api.md): endpoints,
+  approvals, the token, how to debug a run and limits.
 - [M4: retries, pause/resume, saved runs and the lead agent](docs/milestones/M4-orchestration.md): retry rules, pause and
   resume, how to debug a run, limits and the M4 parts still planned.

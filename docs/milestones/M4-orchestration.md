@@ -223,7 +223,7 @@ Every transition says why it happened:
 | `READY` | `no unfinished dependencies`, or after a failed attempt `attempt 1 of 3 failed (validation_rejected); retrying` |
 | `ASSIGNED` | `attempt 1 of 3 assigned to worker backend`, or `attempt 1 of 3 resumed on worker backend` |
 | `RUNNING` | `worker started` or `worker resumed` |
-| `VALIDATING` | `worker reported success; validating`, or `validating again after a pause` |
+| `VALIDATING` | `worker reported success; validating`, `validating again after a pause`, or `the diff was approved; validating` ([M5](M5-api.md)) |
 | `COMPLETED` | `validation accepted` |
 | `PAUSED` | `pause_task was called while RUNNING` or `pause_run was called while PENDING`: who paused it and the status it had. `recovered after a restart while RUNNING`: the process stopped while its worker was in flight. `pause_task was called while PAUSED`: a task held by `pause_run` was then paused by hand |
 | `FAILED` | `attempt 3 of 3 failed (validation_rejected); no attempts left`, or `…; not retried: validator errors are setup problems` |
@@ -308,10 +308,8 @@ because those can contain secrets. Read those in the report.
 
 | Deferred | Waits for |
 |---|---|
-| Running a plan straight from a request | M5, with the REST commands; today `plan` only prints it |
 | A pause that lets running work finish first | When wanted; today a pause always stops the worker |
 | A delay or backoff between attempts | When a real rate-limit failure shows the need |
-| A manual "retry this task" command | M5, with the REST commands |
 
 ## Acceptance checks
 
