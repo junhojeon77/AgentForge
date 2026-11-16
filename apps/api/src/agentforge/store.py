@@ -23,6 +23,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     func,
+    literal_column,
     select,
 )
 from sqlalchemy.dialects.sqlite import insert
@@ -87,6 +88,11 @@ PROPOSALS = Table(
     Column("created_at", String, nullable=False),
     Column("decided_at", String, nullable=True),
 )
+
+
+# By rowid, not created_at: rows are never deleted, so rowid is the saving order, while two
+# quick saves can get the same clock time on Windows.
+_NEWEST = literal_column("rowid").desc()
 
 
 def default_path() -> Path:
@@ -262,6 +268,17 @@ class RunStore:
         # The decision only: a reason is a person's text and stays in the store.
         logger.debug("proposal %s %s", proposal_id, proposal.status)
         return proposal
+
+    def runs(self) -> list[str]:
+        """Ids of every saved run, newest first."""
+        with self._engine.connect() as connection:
+            return list(connection.scalars(select(RUNS.c.id).order_by(_NEWEST)))
+
+    def proposals(self) -> list[Proposal]:
+        """Every proposal, decided ones included, newest first."""
+        with self._engine.connect() as connection:
+            saved = connection.scalars(select(PROPOSALS.c.proposal).order_by(_NEWEST))
+            return [Proposal.model_validate_json(proposal) for proposal in saved]
 
     def unfinished_runs(self) -> list[str]:
         """Ids of saved runs with a task that is not finished, oldest first."""

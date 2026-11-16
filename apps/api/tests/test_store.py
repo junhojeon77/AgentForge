@@ -288,3 +288,17 @@ def test_a_rejected_proposal_keeps_its_reason_and_ids_are_used_once(tmp_path, ca
     with pytest.raises(ValueError, match="no proposal nope"):
         store.decide_proposal("nope", "approved", plan=plan_for("nope"))
     assert "SECRET-REASON" not in caplog.text
+
+
+def test_runs_and_proposals_are_listed_newest_first(tmp_path):
+    store = RunStore(tmp_path / "runs.db")
+    assert store.runs() == [] and store.proposals() == []
+    for run_id in ("b", "c", "a"):  # not alphabetical, so the order must come from saving
+        store.start_run(plan_for(run_id))
+        store.propose(proposal(f"p-{run_id}"))
+    store.decide_proposal("p-c", "rejected", reason="no")
+
+    assert store.runs() == ["a", "c", "b"]
+    proposals = RunStore(tmp_path / "runs.db").proposals()
+    assert [p.id for p in proposals] == ["p-a", "p-c", "p-b"]
+    assert proposals[1].status == "rejected" and proposals[1].reason == "no"

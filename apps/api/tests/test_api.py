@@ -33,6 +33,7 @@ def settings(tmp_path, **changes):
         "worktrees": tmp_path / "trees",
         "checks": {"unit": ("python", "-m", "pytest")},
         "claude_command": (sys.executable, str(FAKE_CLAUDE)),
+        "agents": tmp_path / "agents",
     }
     return ApiSettings(**(values | changes))
 
@@ -109,6 +110,12 @@ ROUTES = [
     ("post", "/runs/r1/tasks/a/pause"),
     ("post", "/runs/r1/tasks/a/resume"),
     ("post", "/runs/r1/tasks/a/cancel"),
+    ("get", "/runs"),
+    ("get", "/proposals"),
+    ("get", "/checks"),
+    ("get", "/agents"),
+    ("put", "/agents/w1"),
+    ("delete", "/agents/w1"),
 ]
 
 
@@ -296,6 +303,148 @@ def test_the_lead_agent_proposes_a_plan_through_the_api(make_client, tmp_path, m
     assert rejected.json()["rounds"] == [{"revision": 0, "source": "critique", "issues": ["x"]}]
 
 
+DEFAULT_IDS = ["backend", "database", "frontend", "integration", "qa"]
+
+
+def agent_ids(client):
+    return [agent["id"] for agent in client.get("/agents", headers=AUTH).json()["agents"]]
+
+
+def test_agents_are_listed_added_edited_and_removed(make_client, tmp_path, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    client = make_client()
+    assert agent_ids(client) == DEFAULT_IDS
+    assert not (tmp_path / "agents").exists()  # listing writes nothing
+
+    added = {"id": "designer", "role": "design", "persona": "SECRET-PERSONA draws screens"}
+    answer = client.put("/agents/designer", json=added, headers=AUTH)
+    assert answer.status_code == 200 and answer.json()["persona"] == added["persona"]
+    assert agent_ids(client) == ["backend", "database", "designer", "frontend", "integration", "qa"]
+
+    assert client.put("/agents/designer", json=added | {"model": "opus"}, headers=AUTH).is_success
+    agents = client.get("/agents", headers=AUTH).json()["agents"]
+    assert [a["model"] for a in agents if a["id"] == "designer"] == ["opus"]
+
+    assert client.delete("/agents/designer", headers=AUTH).status_code == 200
+    assert agent_ids(client) == DEFAULT_IDS
+    assert "api: agent designer saved" in caplog.messages
+    assert "api: agent designer removed" in caplog.messages
+    assert "SECRET-PERSONA" not in caplog.text
+
+
+def test_agent_changes_that_break_a_rule_are_refused(make_client):
+    client = make_client()
+    mismatch = client.put("/agents/other", json={"id": "designer", "role": "x"}, headers=AUTH)
+    assert mismatch.status_code == 400 and "designer" in mismatch.json()["detail"]
+    upper = client.put("/agents/Big", json={"id": "Big", "role": "x"}, headers=AUTH)
+    assert upper.status_code == 400 and "may use only" in upper.json()["detail"]
+    too_long = {"id": "long", "role": "x", "persona": "x" * 10_001}
+    assert client.put("/agents/long", json=too_long, headers=AUTH).status_code == 422
+    assert client.delete("/agents/nope", headers=AUTH).status_code == 404
+
+    for agent_id in DEFAULT_IDS[:-1]:
+        assert client.delete(f"/agents/{agent_id}", headers=AUTH).status_code == 200
+    last = client.delete("/agents/qa", headers=AUTH)
+    assert last.status_code == 400 and "last agent" in last.json()["detail"]
+    assert agent_ids(client) == ["qa"]
+
+
+@pytest.fixture
+def real_workers_client(tmp_path, monkeypatch):
+    """A client whose workers come from the agents folder; only the executor is a mock."""
+    import agentforge.api
+
+    monkeypatch.setattr(agentforge.api, "WorktreeExecutor", lambda claude, root: MockExecutor())
+    with TestClient(create_app(settings(tmp_path), validator=MockValidator())) as client:
+        yield client
+
+
+def worker_models(report):
+    return {w["agent"]["id"]: w["agent"]["model"] for w in report["workers"]}
+
+
+def test_an_agent_edit_reaches_the_next_run_but_not_the_active_one(real_workers_client, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    client = real_workers_client
+    edit = {"a": {"allowed_operations": ["edit"]}}
+    client.post("/proposals", json=hand_plan("r1", hand_plan()["tasks"][0]), headers=AUTH)
+    approve(client, "r1", rights=edit)
+    until(client, "r1", lambda r: status(r, "a") == "AWAITING_APPROVAL")
+
+    backend = {"id": "backend", "role": "backend", "model": "opus"}
+    assert client.put("/agents/backend", json=backend, headers=AUTH).is_success
+    active = client.get("/runs/r1", headers=AUTH).json()
+    assert worker_models(active)["backend"] is None
+    client.post("/runs/r1/tasks/a/approve", headers=AUTH)
+    until(client, "r1", finished)
+
+    client.post("/proposals", json=hand_plan("r2", hand_plan("r2")["tasks"][0]), headers=AUTH)
+    for _ in range(500):
+        if (answer := approve(client, "r2", rights=edit)).status_code != 409:
+            break  # 409 until the finished run frees its slot
+    assert answer.status_code == 202
+    report = until(client, "r2", lambda r: status(r, "a") == "AWAITING_APPROVAL")
+    assert worker_models(report)["backend"] == "opus"
+    assert "api: run r2 starts with agents backend, database, frontend, integration, qa" in (
+        caplog.messages
+    )
+
+
+def test_a_broken_persona_file_is_refused_with_its_name(real_workers_client, tmp_path, caplog):
+    folder = tmp_path / "agents"
+    folder.mkdir()
+    (folder / "broken.md").write_text(
+        "---\nid: broken\nrole: x\n---\n" + "SECRET-PERSONA " * 1000, encoding="utf-8"
+    )
+    client = real_workers_client
+
+    listed = client.get("/agents", headers=AUTH)
+    proposed = client.post("/proposals", json=hand_plan(), headers=AUTH)
+
+    for answer in (listed, proposed):
+        assert answer.status_code == 400 and "broken.md" in answer.json()["detail"]
+    assert "SECRET-PERSONA" not in caplog.text
+
+
+def test_runs_proposals_and_checks_are_listed(make_client):
+    client = make_client()
+    client.post("/proposals", json=hand_plan("r1"), headers=AUTH)
+    client.post("/proposals", json=hand_plan("r0"), headers=AUTH)
+    proposals = client.get("/proposals", headers=AUTH).json()["proposals"]
+    assert [p["id"] for p in proposals] == ["r0", "r1"]  # newest first
+    assert client.get("/runs", headers=AUTH).json() == {
+        "active": None,
+        "unfinished": [],
+        "runs": [],
+    }
+
+    approve(client, "r1", rights={"a": {"allowed_operations": ["edit"]}})
+    until(client, "r1", lambda r: status(r, "a") == "AWAITING_APPROVAL")
+    runs = client.get("/runs", headers=AUTH).json()
+    assert runs == {"active": "r1", "unfinished": ["r1"], "runs": ["r1"]}
+
+    checks = client.get("/checks", headers=AUTH).json()
+    assert checks == {"checks": {"unit": ["python", "-m", "pytest"]}}
+
+
+def test_only_the_desktop_origins_may_call_from_a_browser(make_client):
+    client = make_client()
+    preflight = {
+        "Access-Control-Request-Method": "PUT",
+        "Access-Control-Request-Headers": "authorization, content-type",
+    }
+    for origin in ("http://tauri.localhost", "http://localhost:1420"):
+        allowed = client.options("/agents/w1", headers=preflight | {"Origin": origin})
+        assert allowed.status_code == 200
+        assert allowed.headers["access-control-allow-origin"] == origin
+    refused = client.options("/agents/w1", headers=preflight | {"Origin": "https://evil.example"})
+    assert refused.status_code == 400
+    assert "access-control-allow-origin" not in refused.headers
+
+    answer = client.get("/checks", headers=AUTH | {"Origin": "http://tauri.localhost"})
+    assert answer.headers["access-control-allow-origin"] == "http://tauri.localhost"
+
+
 def test_the_token_file_holds_only_the_token(tmp_path):
     path = write_token(tmp_path / "AgentForge" / "api-token")
     token = path.read_text(encoding="utf-8")
@@ -321,6 +470,7 @@ def test_cli_serve_builds_the_settings_and_writes_a_fresh_token(tmp_path, monkey
     ((serving, port),) = started
     assert port == 9000
     assert serving.checks == {"unit": (python, "-m", "pytest")}
+    assert serving.agents == tmp_path / "appdata" / "AgentForge" / "agents"
     token_file = tmp_path / "appdata" / "AgentForge" / "api-token"
     assert serving.token == token_file.read_text(encoding="utf-8")
     with pytest.raises(SystemExit) as stopped:
