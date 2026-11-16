@@ -54,6 +54,10 @@ A pause never skips an approval: a task waiting for one stays waiting through `p
 | `POST /runs/{id}/tasks/{task}/reject` | Body `{reason}`; rejects a waiting diff |
 | `GET /runs/{id}/events` | `text/event-stream`: `event: transition` with `id` = the sequence and `data` = `{sequence, task_id, status, detail}`, then `event: end`. Send `Last-Event-ID` to get only later events |
 
+M6 added `GET /agents`, `PUT /agents/{id}`, `DELETE /agents/{id}`, `GET /runs`,
+`GET /proposals`, `GET /checks` and CORS for the desktop app; see
+[the M6 doc](M6-desktop.md#contract-added-to-m5s).
+
 Answers: 401 without the right token; 404 for an unknown run, task or proposal; 400 when a rule
 refuses (the message says which); 409 when another run is active or a proposal was already
 decided.
@@ -116,7 +120,6 @@ holds. Failure messages, your reasons, diffs and check output are in `GET /runs/
 
 | Deferred | Waits for |
 |---|---|
-| Agent persona endpoints (list, add, edit, remove) | M6, with on-screen editing |
 | Several runs at once | When wanted; needs a shared worker cap across runs |
 | Approving the rights of an edit-mode check run separately | When wanted |
 

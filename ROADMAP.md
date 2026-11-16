@@ -2,11 +2,12 @@
 
 The goal: one lead agent coordinates specialized coding agents. Five ship by default, and users
 can add, remove or fully customize any of them. Adding, removing and editing agent files works
-today (M2). On-screen editing is planned for M6.
+today (M2), and over the local API since M6's first slice. On-screen editing is planned for a
+later M6 slice.
 
-AgentForge is built in milestones. M1, M2, M3 and the retry, pause/resume and persistence parts of
-M4, and its lead agent, are implemented. The rest is direction, not a promise, and not permission to start a later milestone
-early (see [GOVERNANCE.md](GOVERNANCE.md)).
+AgentForge is built in milestones. M1 to M5 are implemented, and M6's first slice (the API
+additions for the desktop app). The rest is direction, not a promise, and not permission to start
+a later milestone early (see [GOVERNANCE.md](GOVERNANCE.md)).
 
 | Milestone | Scope | Status |
 |---|---|---|
@@ -15,7 +16,7 @@ early (see [GOVERNANCE.md](GOVERNANCE.md)).
 | M3 | One Git worktree per task, edit-capable workers that may run only their own checks, recorded diffs, a validator that runs check commands | Implemented within [documented limits](docs/milestones/M3-worktrees.md) |
 | M4 | Lead orchestration, retries, pause/resume, persistence and recovery | Retries, pause/resume, persistence and recovery implemented within [documented limits](docs/milestones/M4-orchestration.md); the lead agent implemented on 2026-11-15 |
 | M5 | FastAPI REST commands, approvals and SSE events | Implemented within [documented limits](docs/milestones/M5-api.md) on 2026-11-15 |
-| M6 | Tauri 2 desktop dashboard (React, TypeScript), including on-screen agent editing | Planned |
+| M6 | Tauri 2 desktop dashboard (React, TypeScript), including on-screen agent editing | In progress: slice 1 (API additions) implemented on 2026-11-15; the app itself is planned. See [the M6 doc](docs/milestones/M6-desktop.md) |
 | M7 | Integration candidates, conflict detection, review and approved integration | Planned |
 | M8 | Windows packaging, backend lifecycle, secure local communication and recovery checks | Planned |
 
@@ -34,8 +35,8 @@ finished on 2026-11-14, and workers running their own checks on 2026-11-15. Deta
 From M4: a delay between attempts and a pause that lets running work finish. The manual retry
 command and running a plan from a request came with M5. Details are in the
 [M4 doc](docs/milestones/M4-orchestration.md#not-implemented-yet).
-From M5: agent persona endpoints (M6) and several runs at once. Details are in the
-[M5 doc](docs/milestones/M5-api.md#not-implemented-yet).
+From M5: several runs at once; the agent persona endpoints came with M6's first slice. Details
+are in the [M5 doc](docs/milestones/M5-api.md#not-implemented-yet).
 
 ## Guidance for planned milestones
 
@@ -59,6 +60,10 @@ From M5: agent persona endpoints (M6) and several runs at once. Details are in t
   calls the existing `agentforge.personas` functions.
 
 ## Verification history
+
+Verified on 2026-11-15 after M6 slice 1 (API additions): **235 tests passed and 1 skipped** (the
+opt-in live Claude Code test), Ruff lint passed, and all 31 Python files passed the formatting
+check. Tested through FastAPI's `TestClient` with mock workers; no billed call was made.
 
 Verified on 2026-11-15 after M5: **222 tests passed and 1 skipped** (the opt-in live Claude
 Code test), Ruff lint passed, and all 31 Python files passed the formatting check. The real

@@ -293,8 +293,10 @@ The server listens on `127.0.0.1:8765` only and writes a new token to
 `%APPDATA%\AgentForge\api-token` at each start; send it as `Authorization: Bearer <token>`.
 Propose a plan (`POST /proposals`, or `/proposals/from-request` for the lead agent), approve it
 with the rights each task gets, then approve each worker's diff before its checks run, and
-follow it all on `GET /runs/{id}/events`. Endpoints and limits are in
-[the M5 doc](docs/milestones/M5-api.md).
+follow it all on `GET /runs/{id}/events`. `GET /runs`, `GET /proposals` and `GET /checks` list
+what is there, and the agent routes are under [Agents and personas](#agents-and-personas).
+Endpoints and limits are in [the M5 doc](docs/milestones/M5-api.md) and
+[the M6 doc](docs/milestones/M6-desktop.md).
 
 ### 10. Verify
 
@@ -337,8 +339,10 @@ The persona text (up to 10,000 characters) is added to the Claude Code worker's 
 - **Remove** the file, or call `remove_agent(folder, agent_id)`.
 - **Load** them all with `load_agents(folder)`. A broken file raises an error that names it.
 
-These functions are in `agentforge.personas`. Editing agents on screen is planned for the desktop
-app (M6), which will call these same functions.
+These functions are in `agentforge.personas`. The local API calls them too: `GET /agents`,
+`PUT /agents/{id}` and `DELETE /agents/{id}`. An edit applies from the next run; the running run
+keeps its agents. The API refuses to remove the last agent, because an empty folder brings back
+the five defaults. Editing agents on screen is planned for the desktop app (a later M6 slice).
 
 ## Documentation
 

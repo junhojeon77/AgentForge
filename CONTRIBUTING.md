@@ -217,14 +217,18 @@ state is lost when the process exits.
   file name must equal the id, on load and on save. `setup(folder)` copies the shipped
   `default_personas/*.md` only into a folder with no personas, so it never overwrites edits or
   restores removed agents. `save_agent` writes a temp file, then `os.replace`. `load_agents`
-  raises `ValueError` naming the bad file. M6 will call these functions; the M5 API does not
-  expose them yet.
+  raises `ValueError` naming the bad file. The API's agent routes call these functions.
 - **`api.py`: the local REST API (M5).** `create_app(settings, workers=, validator=)` builds
   the FastAPI app; tests pass mock workers. A token dependency guards every route with
   `secrets.compare_digest`. `_Server` holds the store, the one active run (`launch` starts it
   as an asyncio task and turns an early `ValueError` into a 400) and the event-stream queues
   that `Scheduler(on_transition=...)` feeds. `_granted` applies the rights a person gives on
   approval; every task defaults to read-only. `serve` runs uvicorn on 127.0.0.1 only.
+  Since M6: `_Server.agents()` reads `ApiSettings.agents` again for every plan check and run
+  start (injected test workers skip it), so an edit applies from the next run; the agent routes
+  are plain `def` so FastAPI runs their file I/O in a thread; `CORSMiddleware` allows only
+  `ApiSettings.origins` and answers preflights before the token check; `GET /runs` and
+  `GET /proposals` use `RunStore.runs()` and `proposals()`, ordered by SQLite rowid.
   The scheduler side: `AWAITING_APPROVAL` (set in `_execute` when `review_edits` is on),
   `approve_task` (re-dispatches the attempt, whose result makes `_execute` validate only),
   `reject_task` (through `_fail`), and `retry_task`/`recover(retry=...)` (`_reopen`, the only
@@ -251,7 +255,9 @@ Tests are in `apps/api/tests/`:
 - `test_store.py`: saved runs, migrations and recovery on disposable databases. `crash_run.py` is a
   run that the crash test kills mid-task in a real subprocess.
 - `test_api.py`: the REST API through FastAPI's `TestClient` with mock workers; `until()` asks
-  for the report until a state is reached, each request letting the server's loop run.
+  for the report until a state is reached, each request letting the server's loop run. The
+  `real_workers_client` fixture loads workers from a temporary agents folder, with only the
+  worktree executor replaced by a mock.
 - `test_validation.py`: the command validator. Its `hanging` fixture is a check that reports
   its pid over a local socket, a barrier for the timeout and cancellation tests.
 
