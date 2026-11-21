@@ -91,6 +91,47 @@ describe("request", () => {
     expect(logged()).not.toContain("persona file");
   });
 
+  it("turns field errors into readable lines and keeps the body, all out of the log", async () => {
+    const detail = [
+      { loc: ["body", "tasks", 0, "role"], msg: "Field required", input: "SECRET-PLAN" },
+      { loc: ["body", "id"], msg: "String should have at least 1 character" },
+    ];
+    const { client } = setup([json(422, { detail })], [SECRET]);
+
+    const error = await client
+      .send("/proposals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "", tasks: ["SECRET-PLAN"] }),
+      })
+      .catch((e: unknown) => e);
+
+    expect(error).toMatchObject({
+      status: 422,
+      detail: "body.tasks.0.role: Field required; body.id: String should have at least 1 character",
+      body: { detail },
+    });
+    expect(logged()).toContain("POST /proposals answered 422");
+    expect(logged()).not.toContain("SECRET-PLAN");
+    expect(logged()).not.toContain("Field required");
+  });
+
+  it("logs each change it sends with its status, never its body", async () => {
+    const { client } = setup([json(200, { runs: [] }), json(200, { ok: true })], [SECRET]);
+
+    await client.request("/runs");
+    await client.send("/runs/r1/tasks/build/reject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "SECRET-REASON" }),
+    });
+
+    expect(logged()).toContain("POST /runs/r1/tasks/build/reject answered 200");
+    expect(logged()).not.toContain("SECRET-REASON");
+    // The connection poll reads every 2 seconds; successful reads would flood the console.
+    expect(logged()).not.toContain("GET /runs answered");
+  });
+
   it("never logs the token", async () => {
     const { client } = setup([json(401, {}), json(401, {})], [SECRET]);
 

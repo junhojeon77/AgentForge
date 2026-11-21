@@ -9,9 +9,25 @@ export class ApiError extends Error {
     readonly kind: ErrorKind,
     readonly status?: number,
     readonly detail?: string,
+    readonly body?: unknown, // the refusal's parsed body, e.g. the lead agent's rounds
   ) {
     super(detail ?? kind);
   }
+}
+
+/** FastAPI's field errors (a 422) arrive as a list; make them one readable line. */
+function describe(detail: unknown): string | undefined {
+  if (!Array.isArray(detail)) return detail === undefined ? undefined : String(detail);
+  return detail.map((e) => `${(e.loc ?? []).join(".")}: ${e.msg}`).join("; ");
+}
+
+/** A POST with a JSON body; FastAPI parses a body as JSON only with this content type. */
+export function jsonBody(body: unknown): RequestInit {
+  return {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
 }
 
 export interface ClientDeps {
@@ -52,10 +68,15 @@ export function createClient({ readToken, fetch = globalThis.fetch }: ClientDeps
         throw new ApiError("unauthorized", 401);
       }
     }
-    if (!response.ok) {
+    // Every change is logged so a person's clicks can be traced; reads only when refused,
+    // because the connection poll reads every 2 seconds.
+    if (!response.ok || method !== "GET") {
       log.debug(`${method} ${path} answered ${response.status}`);
+    }
+    if (!response.ok) {
       const body = await response.json().catch(() => ({}));
-      throw new ApiError("http", response.status, String(body.detail ?? response.statusText));
+      const detail = describe(body.detail) ?? response.statusText;
+      throw new ApiError("http", response.status, detail, body);
     }
     return response;
   }
