@@ -15,8 +15,9 @@ pause/resume, saved runs with recovery, a lead agent that turns a request into a
 local REST API with approvals and live events. The desktop app (M6) is in progress: it lists
 runs and follows each one live, with its diffs to approve or reject and controls to pause,
 cancel, retry or recover work, and starts runs: ask for something in plain words, then approve
-the lead agent's plan with the rights each task gets. The agent editor, a visual design and a
-first-start survey and guide are planned.
+the lead agent's plan with the rights each task gets, and edits your team of agents (the lead
+agent can propose a new one with a plan). A visual design and a first-start survey and guide
+are planned.
 
 ## What is AgentForge
 
@@ -328,8 +329,13 @@ To start a run, choose **Ask for something**, say what you want and name your pr
 The lead agent plans it (billed; the app asks first), and the plan waits under **Plans** for your
 OK. Tick what each task may do (change files, which checks run before its work is accepted),
 then **Approve and start**; or reject it with a reason. Developers can write the plan as JSON
-instead, and set attempts and time limits under **More options**. The agent screens come in a
-later M6 slice. Details are in [the M6 doc](docs/milestones/M6-desktop.md).
+instead, and set attempts and time limits under **More options**.
+
+**Your team** lists your agents: add one, change its role or how it should work (model and
+reasoning are under **More options**), or remove it; changes apply from the next run. When no
+agent fits part of a request, the lead agent may propose a new one with its plan. You see it on
+the plan's page, can change it, and it joins your team only when you approve the plan. Details
+are in [the M6 doc](docs/milestones/M6-desktop.md).
 
 ### 11. Verify
 
@@ -377,7 +383,8 @@ The persona text (up to 10,000 characters) is added to the Claude Code worker's 
 These functions are in `agentforge.personas`. The local API calls them too: `GET /agents`,
 `PUT /agents/{id}` and `DELETE /agents/{id}`. An edit applies from the next run; the running run
 keeps its agents. The API refuses to remove the last agent, because an empty folder brings back
-the five defaults. Editing agents on screen is planned for the desktop app (a later M6 slice).
+the five defaults. The desktop app edits them on screen (**Your team**), and the lead agent may
+propose a new agent with a plan, made only when a person approves it.
 
 ## Documentation
 

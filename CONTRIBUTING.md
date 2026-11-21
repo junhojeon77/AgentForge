@@ -227,7 +227,9 @@ state is lost when the process exits.
   read-only `ClaudeCodeRunner` sessions with prompts from `PromptTemplate` and replies read by
   `PydanticOutputParser`. check is plain code: `orchestration.validate_plan`, the same rules the
   scheduler applies, so the two cannot drift. `TaskDraft` lists the only fields the model may
-  set; rights and limits come from `task_defaults`.
+  set; rights and limits come from `task_defaults`. `AgentDraft` (in `PlanDraft.new_agents`) is
+  a new agent the model may propose; `_new_agents` checks it (id, clash with `agent_ids`, role,
+  use) and the API saves it only when a person approves the plan.
 - **`validation.py`: `CommandValidator`.** Runs each `check:<name>` constraint as a configured
   argv (no shell) in the result's workspace with a timeout. It rejects on a non-zero exit, a
   timeout or an unknown check, and never reads the worker's `passed_checks`. Timeout and
@@ -239,7 +241,8 @@ state is lost when the process exits.
   file name must equal the id, on load and on save. `setup(folder)` copies the shipped
   `default_personas/*.md` only into a folder with no personas, so it never overwrites edits or
   restores removed agents. `save_agent` writes a temp file, then `os.replace`. `load_agents`
-  raises `ValueError` naming the bad file. The API's agent routes call these functions.
+  raises `ValueError` naming the bad file. `check_id` is the id rule on its own, used by the
+  lead's check. The API's agent routes call these functions.
 - **`api.py`: the local REST API (M5).** `create_app(settings, workers=, validator=)` builds
   the FastAPI app; tests pass mock workers. A token dependency guards every route with
   `secrets.compare_digest`. `_Server` holds the store, the one active run (`launch` starts it
@@ -293,7 +296,7 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   into `ApiError` with a `kind`: `no-token`, `offline`, `unauthorized` or `http` (with the
   server's `detail`; FastAPI's field errors become `field: message` lines, and the parsed body
   is kept as `ApiError.body`). `request` is `send` plus JSON; `jsonBody(body)` makes a JSON
-  POST. It logs every change it sends and every refusal as `<method> <path> answered <status>`,
+  request (POST unless a method is given). It logs every change it sends and every refusal as `<method> <path> answered <status>`,
   never a body.
 - **`src/api/events.ts`: `followEvents`.** It reads `GET /runs/{id}/events` with `fetch`, because
   `EventSource` cannot send the token, and parses the frames itself. After a drop or a lost
@@ -309,23 +312,29 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   run is active, reloads it on every `followEvents` event. Task cards, every attempt with its
   diff, the review box, an inline confirm for Cancel, and the history. `useControl` gives the
   header and each card their own pending state and refusal. It also exports the pieces the
-  proposal screens reuse: `Confirm` (asks first, in place), `ReasonForm` (a required reason),
-  `problem` (an error in words), `BUTTON` and `FIELD`.
+  other screens reuse: `Confirm` (asks first, in place), `ReasonForm` (a required reason),
+  `problem` (an error in words), `MoreOptions` (technical fields, folded), `Field` (a labelled
+  field with a hint), `BUTTON` and `FIELD`.
 - **`src/proposals.ts`: the proposal screens' rules.** The proposal types, `Rights` and
-  `NO_RIGHTS`, `approvalBody(repository, rights)` (the approve body, refusing a bad timeout),
+  `NO_RIGHTS`, `approvalBody(repository, rights, agents)` (the approve body, refusing a bad timeout),
   `parsePlan`, `newRunId`, `planTemplate`, `roundsOf(error)` and one function per request:
   `planRequest`, `proposePlan`, `approveProposal`, `rejectProposal`.
 - **`src/ProposalPage.tsx`: plans.** `NewProposal` (Ask for something, and the JSON editor for
-  developers) and `ProposalPage` (one plan, its approve-with-rights form and reject). Technical
-  fields sit in `MoreOptions`, folded.
-- **`src/App.tsx`**: the status bar, the side list (Ask for something, runs, plans, the plans
+  developers) and `ProposalPage` (one plan, its new agents, its approve-with-rights form and
+  reject). Technical fields sit in `MoreOptions`, folded.
+- **`src/agents.ts`: the team's rules.** `Agent`, `REASONING`, `PERSONA_LIMIT`, `toId(name)`,
+  `agentPath`, `saveAgent` (PUT) and `removeAgent` (DELETE).
+- **`src/AgentsPage.tsx`: Your team.** The list, the inline editor and remove; `AgentFields`
+  (how it should work, and model and reasoning under More options) is shared with the plan
+  page's new agents, whose role stays as proposed; the editor adds the role.
+- **`src/App.tsx`**: the status bar, the side list (Ask for something, Your team, runs, plans, the plans
   polled with `GET /runs`) and the selected page; with no run yet it opens Ask for something.
 - **`src/log.ts`**: console lines prefixed `agentforge.desktop:`. Ids, statuses, paths and
   reasons only, never the token or response text.
 
 Its tests sit next to the code (`*.test.ts`) and use a fake `fetch`, a fake token reader and
 an injected `wait`, with no timers: `client.test.ts`, `events.test.ts`, `connection.test.ts`,
-`runs.test.ts` and `proposals.test.ts`. The components have no tests of their own; `tsc` checks them.
+`runs.test.ts`, `proposals.test.ts` and `agents.test.ts`. The components have no tests of their own; `tsc` checks them.
 
 Delivered contracts and limits are in [M1-domain.md](docs/milestones/M1-domain.md),
 [M2-claude-code.md](docs/milestones/M2-claude-code.md),

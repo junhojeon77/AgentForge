@@ -173,6 +173,27 @@ draft -> check --(issues)--> revise -> check ...
 `allowed_operations`, fails the check. Edit and check rights, the repository, attempts and
 timeouts come from the person through `task_defaults`, and default to a read-only task.
 
+### New agents from the lead
+
+Since 2026-11-20 (M6 slice 5), when part of the work fits none of the roles, the lead may add an
+agent in the draft's `new_agents`: an `id`, a new `role` and a `persona`. It cannot set the model
+or the reasoning; those default to Claude Code's model and `medium`, and the person can change
+them. The check (plain code) refuses, as an issue the next revision is told:
+
+| Issue | When |
+|---|---|
+| `agent id 'X' may use only a-z, 0-9, '-' and '_'` | The id cannot be a file name (`personas.check_id`) |
+| `new agent x is listed twice` | Two new agents share an id |
+| `new agent x: an agent with this id already exists` | `Planner(agent_ids=...)` has it |
+| `new agent x: role r already has an agent; give its tasks to that agent` | The role is registered, or another new agent has it |
+| `new agent x: no task has role r` | Nothing in the plan would use it |
+| `new agent x: role 'r ' starts or ends with a space` | The agent's file cannot keep the spaces (`personas.save_agent` refuses them), so approving would fail |
+| `new agent x: persona: String should have at most 10000 characters` | A field breaks `AgentConfig` |
+
+The plan is then checked with the registered roles plus the new ones, and the critique sees the
+new agents with the tasks. `PlanResult.agents` holds them. Nothing is created here: the API saves
+them only when a person approves the plan (see [the M6 doc](M6-desktop.md#delivered-behavior-slice-5)).
+
 ### Live check (2026-11-15, Claude Code CLI 2.1.323)
 
 One approved run with `claude-haiku-5-5` on a scratch repository: the request "Add a function
@@ -250,7 +271,7 @@ logging.basicConfig(level=logging.DEBUG)
 | `agentforge.orchestration` | DEBUG | Every transition: run, task, status, attempt number, worker and the `Transition.detail` text, e.g. `run r1 task a: PAUSED (attempt 1, worker None): pause_task was called while RUNNING` |
 | `agentforge.orchestration` | WARNING | A failed attempt, with the same text as `Transition.detail`; `saving the run failed (OperationalError); stopping the run` (the error type only); `recovery refused:` and the reason (ids only) |
 | `agentforge.store` | DEBUG | A store opened: path and schema version |
-| `agentforge.lead` | DEBUG | A draft made (task count); the check or the critique found issues (count and revision); the critique accepted the plan |
+| `agentforge.lead` | DEBUG | A draft made (task count); a draft proposing new agents (count only, never a persona); the check or the critique found issues (count and revision); the critique accepted the plan |
 | `agentforge.lead` | WARNING | A plan rejected: revisions made and rounds with issues |
 | `agentforge.worktrees` | DEBUG | A worktree created (path and commit) or reused for a resumed attempt; a diff recorded (length only); a worktree removed by `remove_run` (path) |
 | `agentforge.worktrees` | WARNING | `remove_run` kept a folder that Git does not know as a worktree (path only; Git's message is in the raised error) |
@@ -338,7 +359,8 @@ Run the pytest and Ruff commands in the root README. The M4 tests cover:
 - `test_lead.py` (fake CLI replying from a script): a plan accepted on the first draft; a role no
   agent has, and a critique issue, each fixed by a revision; a plan that never converges rejected
   after six sessions with every round and a WARNING; a reply that tries to grant `allowed_operations`
-  rejected; rights coming only from `task_defaults`; the request text never logged; the `plan`
+  rejected; rights coming only from `task_defaults`; the request text never logged; new agents
+  accepted for a role nobody has and refused for each broken rule (since M6 slice 5); the `plan`
   command printing the plan, and exiting 1 with the rounds when rejected.
 - `test_claude_code.py`, interface: `ClaudeCodeExecutor.ainvoke` equals `execute`, and `ClaudeCodeRunner`
   composes with other LangChain Runnables.

@@ -46,8 +46,8 @@ A pause never skips an approval: a task waiting for one stays waiting through `p
 |---|---|
 | `POST /proposals/from-request` | Body `{request, run_id, workspace, max_revisions}`. The lead agent plans it; 201 with the proposal, or 422 with the rounds when the plan is rejected |
 | `POST /proposals` | Body: a `RunPlan`. 201 with the proposal; 400 if the plan breaks the rules |
-| `GET /proposals/{id}` | The proposal: plan, source (`lead` or `hand`), rounds, status, reason |
-| `POST /proposals/{id}/approve` | Body `{repository, rights: {task_id: TaskRights}}`. 202; starts the run with the same id |
+| `GET /proposals/{id}` | The proposal: plan, source (`lead` or `hand`), rounds, status, reason, and `agents`: new agents the lead proposed (since M6 slice 5) |
+| `POST /proposals/{id}/approve` | Body `{repository, rights: {task_id: TaskRights}, agents?}`. 202; starts the run with the same id. `agents` (since M6 slice 5) are the person's versions of the plan's new agents: the same ids and roles, or 400; an id that exists by now is 409. They are saved to the agents folder only after every check passes |
 | `POST /proposals/{id}/reject` | Body `{reason}` |
 | `GET /runs/unfinished` | `{"runs": [...]}`: saved runs with unfinished tasks |
 | `GET /runs/{id}` | The `RunReport`: live while the run is active, from the store afterwards |

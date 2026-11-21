@@ -13,12 +13,38 @@ technical control one click away, under **More options** or a "for developers" s
 | 2 | App shell (`apps/desktop`): token, API client, live events, connection states | Implemented on 2026-11-18 |
 | 3 | Runs: list, run page, controls, diff review | Implemented on 2026-11-20, with plain styling |
 | 4 | Proposals: list, detail, new from a request or by hand, approve with rights | Implemented on 2026-11-20, with plain styling |
-| 5 | Agent editor, plain path first, every field one click away | Planned |
+| 5 | Agent editor ("Your team"), and new agents the lead agent proposes with a plan | Implemented on 2026-11-20, with plain styling |
 | 6 | Visual design of every screen, from a Claude Design pass | Planned |
 | 7 | First-start survey and guide: choose the plain or technical view (whether **More options** starts open), changeable later | Planned |
 
-Slice 1 is the API side, slice 2 the app's shell, slice 3 the run screens and slice 4 the proposal
-screens. The app has no agent screens yet, and its look is deliberately plain until slice 6.
+Slice 1 is the API side, slice 2 the app's shell, slice 3 the run screens, slice 4 the proposal
+screens and slice 5 the agent editor. The app's look is deliberately plain until slice 6.
+
+## Delivered behavior (slice 5)
+
+**Your team.** A side-list item under **Ask for something** shows every agent the next run gets
+(`GET /agents`): its name, role, model and reasoning, and the first lines of how it works. The
+page says plainly that the lead agent gives each task to the agent with the matching role and
+that changes apply from the next run.
+
+- **Add an agent:** a name ("Saved as `my-agent`" shows the id it becomes: lowercase, `-` for
+  spaces, other characters dropped), a **Role** and **How it should work** (the persona, with a
+  "n of 10,000 characters" count). **Model** (empty: the default) and **Reasoning** sit under
+  **More options**. A name already in the team is caught before saving, since a save replaces.
+- **Edit** opens the same fields in place; the name stays fixed, because it is the file name.
+- **Remove** asks first: "Remove agent qa? Runs from now on will not use it." The last agent
+  cannot be removed; the server's reason is shown.
+- Every save is `PUT /agents/{id}`, every removal `DELETE /agents/{id}`; a refusal shows the
+  server's `detail` (or its field errors) under the form.
+
+**The lead agent can make a new agent when no role fits.** With a plan it may propose new agents
+(a name, a role and how it should work; never a model or reasoning). Plain code checks each one
+before the plan is offered (see [the M4 doc](M4-orchestration.md#new-agents-from-the-lead)). On the
+plan's page, **New agents for this plan** shows each one's name and role, with **How it should
+work** (and **Model** and **Reasoning** under **More options**) to change before **Approve and
+start**. The role stays as proposed, since the plan's tasks go to the agent by role. Approving adds them to your team and the run starts
+with them; rejecting the plan makes none. After the decision the plan's page lists them,
+read-only.
 
 ## Delivered behavior (slice 4)
 
@@ -170,7 +196,7 @@ one default in a new profile keeps the other four.
 | `agentforge.api` | DEBUG | `api: run <id> starts with agents <ids>` |
 | `agentforge.api` | DEBUG | A refused agent request or a broken persona file: the existing `<method> <path> answered <status>`; the detail, which can quote the file, is never logged |
 
-### The desktop app (slices 2 to 4)
+### The desktop app (slices 2 to 5)
 
 | Question | Where the answer is |
 |---|---|
@@ -186,6 +212,11 @@ one default in a new profile keeps the other four.
 | Why was my hand-written plan refused? | The message under **Save the plan**: `not valid JSON: …` (never sent), the rule that broke (400) or the field errors (422) |
 | Why did Approve and start fail? | The `detail` under the form: a run already active (409), an unknown check or a missing folder (400) |
 | Did the app send my approve or reject? | The console's `POST /proposals/<id>/approve answered 202` or `.../reject answered 200`; the plan's status in **Plans** |
+| Why was my agent change refused? | The message under the form: the server's `detail` (a bad name, the last agent) or its field errors (a persona over 10,000 characters) |
+| Did the app save or remove my agent? | The console's `PUT /agents/<id> answered 200` or `DELETE /agents/<id> answered 200`; the server logs `api: agent <id> saved` / `removed` |
+| Why does the running run not use my edit? | Edits apply from the next run; the page says so |
+| Why did the lead agent add an agent, or why was its agent refused? | The plan's page: its new agents, and under "What the lead agent fixed along the way" each rule its agents broke (the check's issues) |
+| Why was a plan with new agents not approved? | The `detail` under the form: `keep the proposed agents: …` (400) or `agent … already exists` (409, made in the meantime) |
 | Where did my plan's reject reason go? | On the plan's page (`Proposal.reason`). It is never logged |
 | What did the app do, in order? | The webview's developer console (right-click, Inspect, in `tauri dev`): lines starting `agentforge.desktop:` |
 
@@ -226,6 +257,11 @@ logged.
 - **Planning holds the page:** the lead agent's answer can take minutes, and leaving the page
   while it plans loses the answer's display (the plan still appears under **Plans**).
 - **The project folder is remembered only while the app is open.**
+- **An agent cannot be renamed;** add one with the new name, then remove the old one.
+- **The five defaults cannot be restored from the app;** add them again by hand, or empty the
+  agents folder yourself.
+- **A new agent the lead proposes cannot be dropped at approval, nor its role changed;** change
+  how it works, or reject the plan and ask again.
 - **Every technical control starts folded** until slice 7's survey lets each person choose.
 - **The look is plain** until slice 6's design pass.
 - **The token path is fixed** to the real `%APPDATA%`. A server started with a different
@@ -236,7 +272,6 @@ logged.
 
 | Deferred | Waits for |
 |---|---|
-| Agent screens | Slice 5 |
 | A visual design | Slice 6 |
 | A first-start survey and guide (plain or technical view) | Slice 7 |
 | A command-line option for allowed origins | When a second client needs it |
@@ -244,7 +279,25 @@ logged.
 ## Acceptance checks
 
 Run the pytest and Ruff commands in the root README, plus `npm --prefix apps/desktop test` and
-`npm --prefix apps/desktop run build`. Slice 4's tests (Vitest, fakes, no timers):
+`npm --prefix apps/desktop run build`. Slice 5's tests:
+
+- `test_lead.py`: a draft adding an agent for a role no agent has, accepted with the agent, the
+  critique shown it, its count logged and its persona not; the check's issue for a bad name, a
+  name already used, a name listed twice, a role that already has an agent, an agent no task
+  uses and a persona over 10,000 characters; a role with a space at an end (the plan is
+  rejected, not offered, with the issue logged as a count).
+- `test_api.py`: a lead proposal carrying its agent; approving it with the person's edits makes
+  the agent (listed, edited) and the run starts with it, with the personas never logged; the
+  agents dropped or renamed (400), a changed role (400), an approval refused by a later check
+  (bad rights) saving no agent, an agent made in the meantime (409, nothing overwritten, the
+  plan still pending), and agents sent for a plan that proposes none (400); the refusals logged
+  as `answered 400`, the persona not.
+- `test_store.py`: a decision keeps the approved agents. `test_personas.py`: `check_id`.
+- `agents.test.ts`: the id made from a name; the encoded path; a save as `PUT` with JSON, a
+  removal as `DELETE`; a refusal reaching the caller. `proposals.test.ts`: the person's
+  versions of the new agents sent, an empty list when there are none. `client.test.ts`: an agent save logged without its persona.
+
+Slice 4's tests (Vitest, fakes, no timers):
 
 - `proposals.test.ts`: the approve body (nothing granted by default; edit, check, checks,
   attempts and a timeout; checks-itself dropped without edit; a bad timeout refused instead of
