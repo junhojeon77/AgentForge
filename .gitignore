@@ -8,3 +8,6 @@ build/
 dist/
 docs/DECISIONS.md
 apps/api/scratch.db
+node_modules/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
