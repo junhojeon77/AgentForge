@@ -161,6 +161,7 @@ class Proposal(Contract):
     plan: RunPlan
     source: Literal["lead", "hand"]  # the lead agent wrote it, or a person did
     rounds: tuple[PlanRound, ...] = ()  # the lead agent's rounds with issues
+    agents: tuple[AgentConfig, ...] = ()  # new agents the lead wants; made only on approval
     status: Literal["pending", "approved", "rejected"] = "pending"
     reason: str = ""  # why it was rejected
 

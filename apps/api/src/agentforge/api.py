@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import secrets
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -83,6 +83,8 @@ class TaskRights(_Body):
 class Approval(_Body):
     repository: str = ""  # used by every task that does not name its own
     rights: dict[str, TaskRights] = {}
+    # The person's versions of the new agents the plan proposes; None keeps them as proposed.
+    agents: tuple[AgentConfig, ...] | None = None
 
 
 class Rejection(_Body):
@@ -267,9 +269,9 @@ def create_app(
         logger.debug("api: %s %s answered %d", request.method, request.url.path, error.status)
         return JSONResponse({"detail": error.detail}, status_code=error.status)
 
-    def checked(plan: RunPlan) -> RunPlan:
+    def checked(plan: RunPlan, new_roles: Iterable[str] = ()) -> RunPlan:
         try:
-            return validate_plan(plan, server.roles())[0]
+            return validate_plan(plan, {*server.roles(), *new_roles})[0]
         except ValueError as error:
             raise _Refused(400, str(error)) from None
 
@@ -299,14 +301,24 @@ def create_app(
             command=settings.claude_command, max_budget_usd=settings.max_budget_usd
         )
         lead = Planner(
-            runner, roles=server.roles(), workspace=body.workspace, max_revisions=body.max_revisions
+            runner,
+            roles=server.roles(),
+            agent_ids={agent.id for agent in server.agents()},
+            workspace=body.workspace,
+            max_revisions=body.max_revisions,
         )
         try:
             result = await lead.ainvoke(PlanRequest(request=body.request, run_id=body.run_id))
         except PlanRejected as rejected:
             rounds = [r.model_dump(mode="json") for r in rejected.rounds]
             return JSONResponse({"detail": str(rejected), "rounds": rounds}, status_code=422)
-        proposal = Proposal(id=body.run_id, plan=result.plan, source="lead", rounds=result.rounds)
+        proposal = Proposal(
+            id=body.run_id,
+            plan=result.plan,
+            source="lead",
+            rounds=result.rounds,
+            agents=result.agents,
+        )
         try:
             server.store.propose(proposal)
         except ValueError as error:
@@ -330,8 +342,33 @@ def create_app(
             raise _Refused(409, f"proposal {proposal_id} is {proposal.status}, not pending")
         if server.run_id is not None:
             raise _Refused(409, f"run {server.run_id} is active; one run at a time")
-        plan = checked(_granted(proposal.plan, approval, settings.checks))
-        decided = server.store.decide_proposal(proposal_id, "approved", plan=plan)
+        agents = proposal.agents if approval.agents is None else approval.agents
+        if sorted(a.id for a in agents) != sorted(a.id for a in proposal.agents):
+            proposed = ", ".join(sorted(a.id for a in proposal.agents)) or "none"
+            raise _Refused(400, f"keep the proposed agents: {proposed}")
+        # Its tasks reach a new agent by role, so the role stays as proposed.
+        roles = {a.id: a.role for a in proposal.agents}
+        if any(a.role != roles[a.id] for a in agents):
+            proposed = ", ".join(f"{agent_id} ({role})" for agent_id, role in sorted(roles.items()))
+            raise _Refused(400, f"keep the proposed roles: {proposed}")
+        existing = {agent.id for agent in server.agents()}
+        if clash := sorted(a.id for a in agents if a.id in existing):
+            raise _Refused(
+                409,
+                f"agent {', '.join(clash)} already exists; reject the plan and ask again, "
+                "or remove that agent",
+            )
+        plan = checked(_granted(proposal.plan, approval, settings.checks), (a.role for a in agents))
+        if agents:
+            # Every check has passed: only now do the new agents join the team.
+            folder = personas.setup(settings.agents)
+            for agent in agents:
+                try:
+                    personas.save_agent(folder, agent)
+                except ValueError as error:
+                    raise _Refused(400, str(error)) from None
+                logger.debug("api: agent %s saved", agent.id)
+        decided = server.store.decide_proposal(proposal_id, "approved", plan=plan, agents=agents)
         await server.launch(plan.id, lambda scheduler: scheduler.run(plan))
         return decided
 

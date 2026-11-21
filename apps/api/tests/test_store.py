@@ -265,8 +265,10 @@ def test_a_plan_waits_as_a_proposal_until_a_person_decides(tmp_path, caplog):
     assert store.get_proposal("nope") is None
 
     approved_plan = plan_for("r1")
-    decided = store.decide_proposal("r1", "approved", plan=approved_plan)
+    agents = (AgentConfig(id="designer", role="design", persona="edited by a person"),)
+    decided = store.decide_proposal("r1", "approved", plan=approved_plan, agents=agents)
     assert decided.status == "approved" and decided.plan == approved_plan
+    assert store.get_proposal("r1").agents == agents
     with pytest.raises(ValueError, match="proposal r1 is approved, not pending"):
         store.decide_proposal("r1", "rejected", reason="too late")
     assert "proposal r1 saved (lead)" in caplog.messages

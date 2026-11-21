@@ -390,6 +390,88 @@ def test_an_agent_edit_reaches_the_next_run_but_not_the_active_one(real_workers_
     )
 
 
+DESIGNER = {"id": "designer", "role": "design", "persona": "SECRET-PERSONA draws screens"}
+
+
+def lead_proposes_a_designer(client, tmp_path, monkeypatch, run_id="lead1"):
+    """The fake Claude drafts a plan that needs a role no agent has, with a new agent for it."""
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "call.json"))
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "script")
+    script = tmp_path / "script.json"
+    drafted = {
+        "tasks": [{"id": "ui", "title": "ui", "role": "design", "acceptance_criteria": ["drawn"]}],
+        "new_agents": [DESIGNER],
+    }
+    script.write_text(json.dumps([drafted, {"issues": []}]), encoding="utf-8")
+    monkeypatch.setenv("FAKE_CLAUDE_SCRIPT", str(script))
+    body = {"request": "Draw it", "run_id": run_id, "workspace": str(tmp_path)}
+    return client.post("/proposals/from-request", json=body, headers=AUTH)
+
+
+def test_a_new_agent_from_the_lead_joins_the_team_when_the_plan_is_approved(
+    real_workers_client, tmp_path, monkeypatch, caplog
+):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    client = real_workers_client
+
+    proposed = lead_proposes_a_designer(client, tmp_path, monkeypatch)
+
+    assert proposed.status_code == 201
+    assert proposed.json()["agents"] == [DESIGNER | {"model": None, "reasoning": "medium"}]
+    assert "designer" not in agent_ids(client)  # nothing is made before approval
+
+    edited = DESIGNER | {"persona": "SECRET-EDITED draws calm screens", "model": "opus"}
+    assert approve(client, "lead1", agents=[edited]).status_code == 202
+
+    agents = {a["id"]: a for a in client.get("/agents", headers=AUTH).json()["agents"]}
+    assert agents["designer"]["persona"] == edited["persona"]
+    assert agents["designer"]["model"] == "opus"
+    saved = client.get("/proposals/lead1", headers=AUTH).json()
+    assert saved["agents"] == [edited | {"reasoning": "medium"}]
+    until(client, "lead1", finished)
+    assert "api: agent designer saved" in caplog.messages
+    assert (
+        "api: run lead1 starts with agents backend, database, designer, frontend, integration, qa"
+        in caplog.messages
+    )
+    assert "SECRET-PERSONA" not in caplog.text and "SECRET-EDITED" not in caplog.text
+
+
+def test_approving_new_agents_is_refused_when_they_change_or_already_exist(
+    make_client, tmp_path, monkeypatch, caplog
+):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    client = make_client()
+    assert lead_proposes_a_designer(client, tmp_path, monkeypatch).status_code == 201
+
+    dropped = approve(client, "lead1", agents=[])
+    renamed = approve(client, "lead1", agents=[DESIGNER | {"id": "painter"}])
+    for answer in (dropped, renamed):
+        assert answer.status_code == 400
+        assert answer.json()["detail"] == "keep the proposed agents: designer"
+    moved = approve(client, "lead1", agents=[DESIGNER | {"role": "art"}])
+    assert moved.status_code == 400
+    assert moved.json()["detail"] == "keep the proposed roles: designer (design)"
+    # Saving comes last: an approval refused by a later check makes no agent.
+    bad_rights = approve(client, "lead1", rights={"nope": {}})
+    assert bad_rights.status_code == 400 and "designer" not in agent_ids(client)
+
+    other = DESIGNER | {"persona": "made by hand in the meantime"}
+    assert client.put("/agents/designer", json=other, headers=AUTH).is_success
+    clash = approve(client, "lead1")
+    assert clash.status_code == 409 and "agent designer already exists" in clash.json()["detail"]
+
+    agents = {a["id"]: a for a in client.get("/agents", headers=AUTH).json()["agents"]}
+    assert agents["designer"]["persona"] == "made by hand in the meantime"  # nothing overwritten
+    assert client.get("/proposals/lead1", headers=AUTH).json()["status"] == "pending"
+
+    client.post("/proposals", json=hand_plan("r9"), headers=AUTH)
+    extra = approve(client, "r9", agents=[DESIGNER])
+    assert extra.status_code == 400 and extra.json()["detail"] == "keep the proposed agents: none"
+    assert "api: POST /proposals/lead1/approve answered 400" in caplog.messages
+    assert "SECRET-PERSONA" not in caplog.text
+
+
 def test_a_broken_persona_file_is_refused_with_its_name(real_workers_client, tmp_path, caplog):
     folder = tmp_path / "agents"
     folder.mkdir()

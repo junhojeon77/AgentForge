@@ -8,7 +8,7 @@ from test_claude_code import FAKE_CLAUDE, fake_calls, flag
 
 from agentforge.__main__ import cli
 from agentforge.claude_code import ClaudeCodeRunner
-from agentforge.domain import RunPlan
+from agentforge.domain import AgentConfig, RunPlan
 from agentforge.lead import Planner, PlanRejected, PlanRequest, PlanRound
 
 REQUEST = "Add a health endpoint SECRET-REQUEST and test it"
@@ -98,6 +98,74 @@ async def test_a_role_no_agent_has_is_found_by_the_check_and_revised(scripted, c
     revised = calls(repo)[1]
     assert "no worker registered for role: designer" in revised["stdin"]
     assert "lead r1: check found 1 issue(s) in revision 0" in caplog.messages
+
+
+def new_agent(agent_id="designer", role="design", persona="SECRET-PERSONA draws screens"):
+    return {"id": agent_id, "role": role, "persona": persona}
+
+
+def with_agents(plan, *agents):
+    return {**plan, "new_agents": list(agents)}
+
+
+async def test_the_lead_may_add_an_agent_for_work_no_role_fits(scripted, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    repo = scripted(with_agents(draft(spec("ui", role="design")), new_agent()), NO_ISSUES)
+
+    result = await planner(repo).ainvoke(PlanRequest(request=REQUEST, run_id="r1"))
+
+    assert [t.role for t in result.plan.tasks] == ["design"]
+    assert result.agents == (
+        AgentConfig(id="designer", role="design", persona="SECRET-PERSONA draws screens"),
+    )
+    assert result.rounds == ()
+    drafted, critiqued = calls(repo)
+    assert "fits none of these roles" in drafted["stdin"]
+    assert "SECRET-PERSONA draws screens" in critiqued["stdin"]  # the critique judges it too
+    assert "lead r1: draft proposes 1 new agent(s)" in caplog.messages
+    assert "SECRET-PERSONA" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "agents, issue",
+    [
+        ([new_agent("Designer")], "agent id 'Designer' may use only a-z, 0-9, '-' and '_'"),
+        ([new_agent("backend")], "new agent backend: an agent with this id already exists"),
+        ([new_agent(), new_agent()], "new agent designer is listed twice"),
+        (
+            [new_agent(), new_agent("other", role="backend")],
+            "new agent other: role backend already has an agent; give its tasks to that agent",
+        ),
+        ([new_agent(), new_agent("idle", role="idle")], "new agent idle: no task has role idle"),
+        (
+            [new_agent(persona="x" * 10_001)],
+            "new agent designer: persona: String should have at most 10000 characters",
+        ),
+    ],
+)
+async def test_a_new_agent_that_breaks_a_rule_is_found_by_the_check(scripted, agents, issue):
+    repo = scripted(with_agents(draft(spec("ui", role="design")), *agents), GOOD, NO_ISSUES)
+
+    result = await planner(repo, agent_ids=("backend", "qa")).ainvoke(
+        PlanRequest(request=REQUEST, run_id="r1")
+    )
+
+    assert result.rounds == (PlanRound(revision=0, source="check", issues=(issue,)),)
+    assert result.agents == ()
+
+
+async def test_a_new_agent_role_with_a_space_at_an_end_is_found_by_the_check(scripted, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    spaced = with_agents(draft(spec("ui", role="design ")), new_agent(role="design "))
+    repo = scripted(spaced, NO_ISSUES)
+
+    with pytest.raises(PlanRejected) as rejected:
+        await planner(repo, max_revisions=0).ainvoke(PlanRequest(request=REQUEST, run_id="r1"))
+
+    issue = "new agent designer: role 'design ' starts or ends with a space"
+    assert rejected.value.rounds == (PlanRound(revision=0, source="check", issues=(issue,)),)
+    assert "lead r1: check found 1 issue(s) in revision 0" in caplog.messages
+    assert "SECRET-PERSONA" not in caplog.text
 
 
 async def test_a_critique_issue_is_revised(scripted):

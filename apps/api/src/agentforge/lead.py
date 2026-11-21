@@ -2,8 +2,9 @@
 
 A LangGraph workflow drafts a plan with the Claude Code CLI, checks it with the scheduler's own
 rules, has the CLI critique it against the request, and revises it until both pass or the
-revisions run out. The model only proposes tasks: rights and limits (edit, checks, attempts,
-timeouts, the repository) come from the person, and the scheduler checks the plan again before
+revisions run out. The model only proposes tasks, and new agents when no role fits: rights and
+limits (edit, checks, attempts, timeouts, the repository) come from the person, a new agent
+exists only once a person approves the plan, and the scheduler checks the plan again before
 anything runs.
 """
 
@@ -22,8 +23,9 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agentforge.claude_code import READ_ONLY_TOOLS, ClaudeCall, ClaudeCodeRunner
-from agentforge.domain import Contract, Identifier, PlanRound, RunPlan, TaskSpec
+from agentforge.domain import AgentConfig, Contract, Identifier, PlanRound, RunPlan, TaskSpec
 from agentforge.orchestration import validate_plan
+from agentforge.personas import check_id
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +46,17 @@ class TaskDraft(_Strict):
     dependencies: tuple[Identifier, ...] = ()
 
 
+class AgentDraft(_Strict):
+    """A new agent the model may propose; its model and reasoning are the person's to set."""
+
+    id: Identifier
+    role: Identifier
+    persona: str = ""
+
+
 class PlanDraft(_Strict):
     tasks: tuple[TaskDraft, ...] = Field(min_length=1)
+    new_agents: tuple[AgentDraft, ...] = ()
 
 
 class Critique(_Strict):
@@ -60,6 +71,7 @@ class PlanRequest(Contract):
 class PlanResult(Contract):
     plan: RunPlan
     rounds: tuple[PlanRound, ...] = ()  # every round that found issues, in order
+    agents: tuple[AgentConfig, ...] = ()  # new agents the plan needs; a person approves them
 
 
 class PlanRejected(ValueError):
@@ -88,13 +100,17 @@ _TASK_RULES = (
     "Split the work into tasks. Each task goes to one worker of one of these roles: {roles}. "
     "Task ids use only letters, digits, '-' and '_'. A task lists the ids of the tasks that "
     "must finish before it, with no cycles. Keep each task small enough for one worker, and "
-    "write acceptance criteria a reviewer can check.\n"
+    "write acceptance criteria a reviewer can check. If part of the work fits none of these "
+    "roles, you may add an agent for it in new_agents: an id of a-z, 0-9, '-' and '_', a new "
+    "role, and a persona telling it how to work. Add one only when no role fits; a person "
+    "approves it before it exists.\n"
 )
 _DRAFT = PromptTemplate.from_template(_INTRO + _TASK_RULES + "Request:\n{request}\n")
 _CRITIQUE = PromptTemplate.from_template(
-    _INTRO + "Review the plan below against the request. List each concrete problem: missing "
-    "work, wrong order or dependencies, tasks too large for one worker, criteria nobody can "
-    "check. Return no issues if the plan is good.\nRequest:\n{request}\nPlan:\n{plan}\n"
+    _INTRO + "Review the plan below, its tasks and any new agents, against the request. List "
+    "each concrete problem: missing work, wrong order or dependencies, tasks too large for one "
+    "worker, criteria nobody can check, a new agent that is not needed. Return no issues if the "
+    "plan is good.\nRequest:\n{request}\nPlan:\n{plan}\n"
 )
 _REVISE = PromptTemplate.from_template(
     _INTRO + _TASK_RULES + "Revise the plan below so that every issue is fixed, and return the "
@@ -107,6 +123,7 @@ class _State(TypedDict):
     run_id: str
     draft: str  # the latest draft as the model sent it, JSON
     plan: RunPlan | None
+    agents: tuple[AgentConfig, ...]  # the new agents of the checked plan
     revision: int
     pending: tuple[str, ...]  # issues found in the latest round, for the next revision
     rounds: Annotated[list[PlanRound], operator.add]
@@ -130,6 +147,7 @@ class Planner(Runnable[PlanRequest, PlanResult]):
         effort: str = "medium",
         model: str | None = None,
         task_defaults: Mapping[str, object] | None = None,
+        agent_ids: Iterable[str] = (),
     ):
         if type(max_revisions) is not int or max_revisions < 0:
             raise ValueError("max_revisions must be a whole number, 0 or more")
@@ -138,6 +156,7 @@ class Planner(Runnable[PlanRequest, PlanResult]):
             raise ValueError(f"task_defaults cannot set what the plan decides: {sorted(granted)}")
         self.runner = runner
         self.roles = tuple(sorted(set(roles)))
+        self.agent_ids = frozenset(agent_ids)  # a new agent must not reuse one
         self.workspace = workspace
         self.max_revisions = max_revisions
         self.effort = effort
@@ -157,6 +176,7 @@ class Planner(Runnable[PlanRequest, PlanResult]):
                 "run_id": request.run_id,
                 "draft": "",
                 "plan": None,
+                "agents": (),
                 "revision": 0,
                 "pending": (),
                 "rounds": [],
@@ -171,7 +191,7 @@ class Planner(Runnable[PlanRequest, PlanResult]):
                 request.run_id, state["revision"], len(rounds),
             )  # fmt: skip
             raise PlanRejected(request.run_id, rounds)
-        return PlanResult(plan=state["plan"], rounds=rounds)
+        return PlanResult(plan=state["plan"], rounds=rounds, agents=state["agents"])
 
     def _build(self):
         graph = StateGraph(_State)
@@ -229,7 +249,12 @@ class Planner(Runnable[PlanRequest, PlanResult]):
             issues = ("the reply does not match the plan schema; use only the fields it lists",)
         else:
             logger.debug("lead %s: draft made (%d tasks)", run_id, len(draft.tasks))
+            if draft.new_agents:  # the count only: a persona is the model's text
+                logger.debug(
+                    "lead %s: draft proposes %d new agent(s)", run_id, len(draft.new_agents)
+                )
             try:
+                agents = self._new_agents(draft)
                 plan = RunPlan(
                     id=run_id,
                     tasks=tuple(
@@ -237,21 +262,59 @@ class Planner(Runnable[PlanRequest, PlanResult]):
                         for task in draft.tasks
                     ),
                 )
-                plan, _ = validate_plan(plan, self.roles)
+                plan, _ = validate_plan(plan, {*self.roles, *(a.role for a in agents)})
             except (ValidationError, ValueError) as error:
                 issues = (str(error).splitlines()[0],)
             else:
-                return {"plan": plan, "pending": ()}
+                return {"plan": plan, "agents": agents, "pending": ()}
         logger.debug(
             "lead %s: check found %d issue(s) in revision %d", run_id, len(issues), revision
         )
         found = PlanRound(revision=revision, source="check", issues=issues)
-        return {"plan": None, "pending": issues, "rounds": [found]}
+        return {"plan": None, "agents": (), "pending": issues, "rounds": [found]}
+
+    def _new_agents(self, draft: PlanDraft) -> tuple[AgentConfig, ...]:
+        """The draft's new agents, checked by plain code; ValueError names the first problem."""
+        used = {task.role for task in draft.tasks}
+        taken = set(self.roles)
+        agents: list[AgentConfig] = []
+        for new in draft.new_agents:
+            check_id(new.id)
+            if any(agent.id == new.id for agent in agents):
+                raise ValueError(f"new agent {new.id} is listed twice")
+            if new.id in self.agent_ids:
+                raise ValueError(f"new agent {new.id}: an agent with this id already exists")
+            try:
+                agent = AgentConfig(**new.model_dump())
+            except ValidationError as error:
+                first = error.errors()[0]
+                where = ".".join(str(part) for part in first["loc"])
+                raise ValueError(f"new agent {new.id}: {where}: {first['msg']}") from None
+            # The agent file cannot keep these spaces, so approving would fail (save_agent).
+            if agent.role != agent.role.strip():
+                raise ValueError(
+                    f"new agent {new.id}: role {agent.role!r} starts or ends with a space"
+                )
+            if agent.role in taken:
+                raise ValueError(
+                    f"new agent {new.id}: role {agent.role} already has an agent; "
+                    "give its tasks to that agent"
+                )
+            if agent.role not in used:
+                raise ValueError(f"new agent {new.id}: no task has role {agent.role}")
+            taken.add(agent.role)
+            agents.append(agent)
+        return tuple(agents)
 
     async def _critique(self, state: _State) -> dict:
-        prompt = _CRITIQUE.format(
-            request=state["request"], plan=state["plan"].model_dump_json(include={"tasks"})
-        )
+        plan = {
+            "tasks": state["plan"].model_dump(mode="json")["tasks"],
+            "new_agents": [
+                agent.model_dump(mode="json", include={"id", "role", "persona"})
+                for agent in state["agents"]
+            ],
+        }
+        prompt = _CRITIQUE.format(request=state["request"], plan=json.dumps(plan))
         output = await self._ask(state, prompt, _schema(Critique))
         try:
             issues = _CRITIQUE_PARSE.parse(json.dumps(output)).issues

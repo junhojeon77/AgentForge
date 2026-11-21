@@ -188,11 +188,12 @@ def _plan(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     workspace = Path(args.workspace).resolve()
     if not workspace.is_dir():
         parser.error(f"workspace is not a folder: {workspace}")
-    roles = {agent.role for agent in load_agents(default_folder()) or default_agents()}
+    agents = load_agents(default_folder()) or default_agents()
     try:
         lead = Planner(
             ClaudeCodeRunner(command=args.command),
-            roles=roles,
+            roles={agent.role for agent in agents},
+            agent_ids={agent.id for agent in agents},
             workspace=str(workspace),
             max_revisions=args.max_revisions,
         )

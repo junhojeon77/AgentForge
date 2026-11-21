@@ -2,7 +2,7 @@ import pytest
 
 from agentforge.domain import AgentConfig
 from agentforge.mocks import DEFAULT_ROLES
-from agentforge.personas import load_agents, remove_agent, save_agent, setup
+from agentforge.personas import check_id, load_agents, remove_agent, save_agent, setup
 
 
 def test_setup_creates_the_five_default_personas(tmp_path):
@@ -70,6 +70,16 @@ def test_save_rejects_unsafe_ids_and_multiline_values(tmp_path, agent):
     with pytest.raises(ValueError):
         save_agent(tmp_path, agent)
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("agent_id", ["../x", "Backend", "a b", ""])
+def test_check_id_refuses_what_cannot_be_a_file_name(agent_id):
+    with pytest.raises(ValueError, match="may use only a-z, 0-9"):
+        check_id(agent_id)
+
+
+def test_check_id_accepts_a_safe_id():
+    check_id("ui-designer_2")
 
 
 def test_remove_rejects_unsafe_ids(tmp_path):

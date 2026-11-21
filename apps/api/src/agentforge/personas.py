@@ -71,9 +71,14 @@ def remove_agent(folder: Path, agent_id: str) -> None:
     _path(folder, agent_id).unlink()
 
 
-def _path(folder: Path, agent_id: str) -> Path:
+def check_id(agent_id: str) -> None:
+    """Refuse an id that cannot be an agent's file name."""
     if not _SAFE_ID.fullmatch(agent_id):
         raise ValueError(f"agent id {agent_id!r} may use only a-z, 0-9, '-' and '_'")
+
+
+def _path(folder: Path, agent_id: str) -> Path:
+    check_id(agent_id)
     return Path(folder) / f"{agent_id}.md"
 
 

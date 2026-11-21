@@ -30,6 +30,7 @@ from sqlalchemy.dialects.sqlite import insert
 
 from agentforge.domain import (
     TERMINAL,
+    AgentConfig,
     Proposal,
     RunPlan,
     RunReport,
@@ -241,6 +242,7 @@ class RunStore:
         *,
         reason: str = "",
         plan: RunPlan | None = None,
+        agents: tuple[AgentConfig, ...] | None = None,
     ) -> Proposal:
         """Approve (with the plan as approved, rights included) or reject a pending proposal."""
         with self._engine.begin() as connection:
@@ -255,6 +257,8 @@ class RunStore:
             update = {"status": status, "reason": reason}
             if plan is not None:
                 update["plan"] = plan
+            if agents is not None:
+                update["agents"] = agents
             proposal = Proposal.model_validate(proposal.model_dump() | update)
             connection.execute(
                 PROPOSALS.update()
