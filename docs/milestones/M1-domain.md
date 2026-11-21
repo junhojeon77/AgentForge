@@ -1,5 +1,8 @@
 # M1 — Domain Models and Task Scheduler
 
+*AgentForge is for people who do not code as well as those who do; see
+[Who it is for](../../README.md). This document covers the technical layer underneath.*
+
 ## Delivered behavior
 
 M1 is a Python library under `apps/api/src/agentforge`. It validates a fixed task dependency graph,

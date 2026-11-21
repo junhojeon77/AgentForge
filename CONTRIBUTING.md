@@ -4,6 +4,17 @@ Thanks for helping. This guide covers setup, the workflow, commits and a map of 
 decides what is in [GOVERNANCE.md](GOVERNANCE.md), and what is planned is in
 [ROADMAP.md](ROADMAP.md).
 
+**Who it is for.** People who do not code: you ask for something in your own words, the
+lead agent plans it, you approve the plan, and the team of agents builds it. People who do code
+can still customize, fine-tune or edit anything (agents, plans, rights, checks) and feel at
+home. The app leads with the plain path and keeps every technical control one click away; a
+first-start survey (planned, M6 slice 7) lets each person choose whether those controls start
+open.
+
+When you write a screen or a message: plain words first (say "May change files", not
+`allowed_operations`), ids still visible, and technical controls behind **More options** or a
+"for developers" section, never removed.
+
 ## Setup
 
 Python 3.11+ on Windows. From the repository root in PowerShell:
@@ -280,7 +291,10 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
 - **`src/api/client.ts`: `createClient({readToken, fetch})`.** `send` adds the bearer token,
   re-reads it once after a 401 (the server writes a new one at every start) and turns failures
   into `ApiError` with a `kind`: `no-token`, `offline`, `unauthorized` or `http` (with the
-  server's `detail`). `request` is `send` plus JSON.
+  server's `detail`; FastAPI's field errors become `field: message` lines, and the parsed body
+  is kept as `ApiError.body`). `request` is `send` plus JSON; `jsonBody(body)` makes a JSON
+  POST. It logs every change it sends and every refusal as `<method> <path> answered <status>`,
+  never a body.
 - **`src/api/events.ts`: `followEvents`.** It reads `GET /runs/{id}/events` with `fetch`, because
   `EventSource` cannot send the token, and parses the frames itself. After a drop or a lost
   server it waits and reconnects with `Last-Event-ID`; it stops at `end`, on abort, or on any
@@ -288,13 +302,30 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
 - **`src/api/token.ts`**: `readToken()` through the fs plugin; `null` when there is no file.
 - **`src/connection.ts`: `useConnection`.** It polls `GET /runs` with TanStack Query and maps the
   outcome to a state (`connectionState`); `logState` logs each change.
-- **`src/App.tsx`**: the status bar and the active run's live transitions.
+- **`src/runs.ts`: the run page's rules.** The report types, `taskActions(status, live)` (which
+  controls a task offers, mirroring the scheduler), `diffTone(line)` and
+  `sendControl(client, runId, action, task?, reason?)`, which POSTs a run or task control.
+- **`src/RunPage.tsx`: one run.** It reads `GET /runs/{id}` with TanStack Query and, while the
+  run is active, reloads it on every `followEvents` event. Task cards, every attempt with its
+  diff, the review box, an inline confirm for Cancel, and the history. `useControl` gives the
+  header and each card their own pending state and refusal. It also exports the pieces the
+  proposal screens reuse: `Confirm` (asks first, in place), `ReasonForm` (a required reason),
+  `problem` (an error in words), `BUTTON` and `FIELD`.
+- **`src/proposals.ts`: the proposal screens' rules.** The proposal types, `Rights` and
+  `NO_RIGHTS`, `approvalBody(repository, rights)` (the approve body, refusing a bad timeout),
+  `parsePlan`, `newRunId`, `planTemplate`, `roundsOf(error)` and one function per request:
+  `planRequest`, `proposePlan`, `approveProposal`, `rejectProposal`.
+- **`src/ProposalPage.tsx`: plans.** `NewProposal` (Ask for something, and the JSON editor for
+  developers) and `ProposalPage` (one plan, its approve-with-rights form and reject). Technical
+  fields sit in `MoreOptions`, folded.
+- **`src/App.tsx`**: the status bar, the side list (Ask for something, runs, plans, the plans
+  polled with `GET /runs`) and the selected page; with no run yet it opens Ask for something.
 - **`src/log.ts`**: console lines prefixed `agentforge.desktop:`. Ids, statuses, paths and
   reasons only, never the token or response text.
 
 Its tests sit next to the code (`*.test.ts`) and use a fake `fetch`, a fake token reader and
-an injected `wait`, with no timers: `client.test.ts`, `events.test.ts` and
-`connection.test.ts`.
+an injected `wait`, with no timers: `client.test.ts`, `events.test.ts`, `connection.test.ts`,
+`runs.test.ts` and `proposals.test.ts`. The components have no tests of their own; `tsc` checks them.
 
 Delivered contracts and limits are in [M1-domain.md](docs/milestones/M1-domain.md),
 [M2-claude-code.md](docs/milestones/M2-claude-code.md),

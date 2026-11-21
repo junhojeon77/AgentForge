@@ -1,5 +1,8 @@
 # M4 — Retries, pause/resume, persistence and the lead agent
 
+*AgentForge is for people who do not code as well as those who do; see
+[Who it is for](../../README.md). This document covers the technical layer underneath.*
+
 M4 is built in four parts. All four are implemented.
 
 | Part | Status |

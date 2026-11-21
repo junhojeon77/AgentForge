@@ -1,5 +1,8 @@
 # M2 — Claude Code Worker Adapter (read-only)
 
+*AgentForge is for people who do not code as well as those who do; see
+[Who it is for](../../README.md). This document covers the technical layer underneath.*
+
 ## Delivered behavior
 
 `agentforge.claude_code.ClaudeCodeExecutor` is a `WorkerExecutor` that runs one Claude Code CLI

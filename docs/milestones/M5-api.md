@@ -1,5 +1,8 @@
 # M5 — Local REST API, approvals and live events
 
+*AgentForge is for people who do not code as well as those who do; see
+[Who it is for](../../README.md). This document covers the technical layer underneath.*
+
 ## Delivered behavior
 
 AgentForge now runs as a local server that a person, or the planned M6 desktop app, drives over

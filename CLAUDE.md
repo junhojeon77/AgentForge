@@ -5,9 +5,13 @@ This file gives instructions to AI coding assistants working on this project.
 ## Project Overview
 
 AgentForge is a planned local-first Windows platform where one lead agent coordinates specialized
-coding agents: five by default, and users can add, remove or fully customize any of them. M1–M5 (including the lead agent and the local REST API) are implemented in `apps/api/src/agentforge`. M6 (the desktop app, `apps/desktop`) is in progress: slice 1 (API additions) and slice 2 (the app shell: token, API client, live events, connection states) are built. LangGraph and LangChain are used only for the lead agent and the Claude Code Runnable interface; keep scheduling, saved runs and recovery in plain code.
+coding agents: five by default, and users can add, remove or fully customize any of them. M1–M5 (including the lead agent and the local REST API) are implemented in `apps/api/src/agentforge`. M6 (the desktop app, `apps/desktop`) is in progress: slice 1 (API additions), slice 2 (the app shell: token, API client, live events, connection states) slice 3 (the run screens: list, run page, controls, diff review, plain styling) and slice 4 (the proposal screens: ask for something, plans, approve with rights, reject) are built. LangGraph and LangChain are used only for the lead agent and the Claude Code Runnable interface; keep scheduling, saved runs and recovery in plain code.
 Everything else is planned. Keep AI reasoning separate from deterministic scheduling, validation,
 permissions and human approval.
+
+**Who it is for:** people who do not code ask for something in plain words, the lead agent plans
+it and the team builds it; people who do code can still customize, fine-tune or edit anything.
+Both must be served (see [GOVERNANCE.md](GOVERNANCE.md#who-agentforge-is-for)).
 
 - How the code works: [CONTRIBUTING.md § Code map](CONTRIBUTING.md#code-map)
 - What is built and what is planned: [ROADMAP.md](ROADMAP.md)
@@ -20,6 +24,9 @@ permissions and human approval.
 - Never run the live Claude Code test (it is billed) without asking first.
 - The roadmap is direction, not permission: don't build later milestones or add their
   dependencies unless asked.
+- Screens and messages use plain words first, keep ids visible, and put technical controls behind
+  **More options** or a "for developers" section; never remove one. Whether they start open is
+  the user's choice (a first-start survey, M6 slice 7, planned).
 - Use subagents only when the user asks. Run one editor at a time; only read-only investigators
   may run in parallel.
 - Keep the user's unrelated changes. Add no speculative features, abstractions or dependencies.

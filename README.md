@@ -3,11 +3,20 @@
 A local-first Windows platform where one lead agent coordinates specialized coding agents. It ships
 with five, and you can add, remove or fully customize any of them.
 
+**Who it is for.** People who do not code: you ask for something in your own words, the
+lead agent plans it, you approve the plan, and the team of agents builds it. People who do code
+can still customize, fine-tune or edit anything (agents, plans, rights, checks) and feel at
+home. The app leads with the plain path and keeps every technical control one click away; a
+first-start survey (planned, M6 slice 7) lets each person choose whether those controls start
+open.
+
 **Status:** M1–M5 are implemented: a Python library (workers, worktrees, retries,
 pause/resume, saved runs with recovery, a lead agent that turns a request into a plan) and a
-local REST API with approvals and live events. The desktop app (M6) is in progress: its shell
-connects to the API and follows the active run live; the run, proposal and agent screens are
-planned.
+local REST API with approvals and live events. The desktop app (M6) is in progress: it lists
+runs and follows each one live, with its diffs to approve or reject and controls to pause,
+cancel, retry or recover work, and starts runs: ask for something in plain words, then approve
+the lead agent's plan with the rights each task gets. The agent editor, a visual design and a
+first-start survey and guide are planned.
 
 ## What is AgentForge
 
@@ -309,10 +318,18 @@ npm --prefix apps/desktop install
 npm --prefix apps/desktop run tauri dev
 ```
 
-The window shows whether the server answers and follows the active run's events live. It reads
-the token from `%APPDATA%\AgentForge\api-token` again after each server restart. So far it is a
-shell: the run, proposal and agent screens come in later M6 slices. Details are in
-[the M6 doc](docs/milestones/M6-desktop.md).
+The window shows whether the server answers and lists every saved run. A run's page shows each
+task with its attempts, diffs and reasons, and follows the active run live. There you approve or
+reject a waiting diff (a rejection needs a reason, which the next attempt is told), pause,
+resume, cancel or retry tasks, and recover a run that a restart interrupted. The app reads the
+token from `%APPDATA%\AgentForge\api-token` again after each server restart.
+
+To start a run, choose **Ask for something**, say what you want and name your project folder.
+The lead agent plans it (billed; the app asks first), and the plan waits under **Plans** for your
+OK. Tick what each task may do (change files, which checks run before its work is accepted),
+then **Approve and start**; or reject it with a reason. Developers can write the plan as JSON
+instead, and set attempts and time limits under **More options**. The agent screens come in a
+later M6 slice. Details are in [the M6 doc](docs/milestones/M6-desktop.md).
 
 ### 11. Verify
 

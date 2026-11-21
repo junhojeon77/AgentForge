@@ -1,5 +1,8 @@
 # M3 — Worktrees, edit-capable workers, diffs and real validation
 
+*AgentForge is for people who do not code as well as those who do; see
+[Who it is for](../../README.md). This document covers the technical layer underneath.*
+
 ## Delivered behavior
 
 A worker can now change code without touching your checkout:
