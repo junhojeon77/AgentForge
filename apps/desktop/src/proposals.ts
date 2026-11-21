@@ -1,3 +1,4 @@
+import type { Agent } from "./agents";
 import { ApiError, type Client, jsonBody } from "./api/client";
 
 // The parts of the server's Proposal (domain.py) that the proposal page shows.
@@ -25,6 +26,7 @@ export interface Proposal {
   rounds: PlanRound[];
   status: "pending" | "approved" | "rejected";
   reason: string;
+  agents: Agent[]; // new agents the lead wants; made only when the plan is approved
 }
 
 /** One task's rights as the approve form holds them. */
@@ -45,8 +47,12 @@ export const NO_RIGHTS: Rights = {
   timeout: "",
 };
 
-/** The body of `POST /proposals/{id}/approve`. */
-export function approvalBody(repository: string, rights: Record<string, Rights>) {
+/** The body of `POST /proposals/{id}/approve`, with the person's versions of any new agents. */
+export function approvalBody(
+  repository: string,
+  rights: Record<string, Rights>,
+  agents: Agent[] = [],
+) {
   const granted = Object.entries(rights).map(([task, r]) => {
     const operations = r.edit ? (r.runChecks ? ["edit", "check"] : ["edit"]) : [];
     const body: Record<string, unknown> = {
@@ -64,7 +70,7 @@ export function approvalBody(repository: string, rights: Record<string, Rights>)
     }
     return [task, body] as const;
   });
-  return { repository, rights: Object.fromEntries(granted) };
+  return { repository, rights: Object.fromEntries(granted), agents };
 }
 
 /** A hand-written plan; the server checks it against the rules. */
@@ -118,8 +124,10 @@ export async function approveProposal(
   id: string,
   repository: string,
   rights: Record<string, Rights>,
+  agents: Agent[] = [],
 ): Promise<Proposal> {
-  return client.request(proposalPath(id, "approve"), jsonBody(approvalBody(repository, rights)));
+  const body = approvalBody(repository, rights, agents);
+  return client.request(proposalPath(id, "approve"), jsonBody(body));
 }
 
 export function rejectProposal(client: Requester, id: string, reason: string): Promise<Proposal> {

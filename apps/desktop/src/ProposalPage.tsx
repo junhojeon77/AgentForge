@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useId, useState } from "react";
+import { useState } from "react";
+import { AgentFields } from "./AgentsPage";
+import type { Agent } from "./agents";
 import type { Client } from "./api/client";
 import {
   approveProposal,
@@ -15,45 +17,13 @@ import {
   rejectProposal,
   roundsOf,
 } from "./proposals";
-import { BUTTON, Confirm, FIELD, problem, ReasonForm } from "./RunPage";
+import { BUTTON, Confirm, FIELD, Field, MoreOptions, problem, ReasonForm } from "./RunPage";
 
 export const STATUS = {
   pending: "Waiting for your OK",
   approved: "Approved",
   rejected: "Rejected",
 } as const;
-
-// Technical controls stay one click away; slice 7's first-start survey will choose whether
-// these start open.
-function MoreOptions({ children }: { children: ReactNode }) {
-  return (
-    <details className="text-sm">
-      <summary className="cursor-pointer">More options</summary>
-      <div className="mt-2 space-y-2 border-l-2 border-slate-200 pl-3">{children}</div>
-    </details>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: (id: string) => ReactNode;
-}) {
-  const id = useId();
-  return (
-    <div className="flex flex-col gap-1 text-sm">
-      <label htmlFor={id} className="font-medium">
-        {label}
-      </label>
-      {children(id)}
-      {hint && <span className="text-slate-700">{hint}</span>}
-    </div>
-  );
-}
 
 function Rounds({ rounds }: { rounds: PlanRound[] }) {
   if (rounds.length === 0) return null;
@@ -76,6 +46,29 @@ function Rounds({ rounds }: { rounds: PlanRound[] }) {
         ))}
       </ol>
     </details>
+  );
+}
+
+function NewAgents({ title, agents }: { title: string; agents: Agent[] }) {
+  return (
+    <>
+      <h2 className="font-semibold">{title}</h2>
+      <ul className="space-y-2">
+        {agents.map((agent) => (
+          <li key={agent.id} className="rounded border border-slate-300 p-3 text-sm">
+            <p className="font-medium break-all">
+              {agent.id} · {agent.role}
+            </p>
+            <p className="text-slate-700">
+              {agent.model ?? "default model"} · {agent.reasoning} reasoning
+            </p>
+            {agent.persona && (
+              <p className="break-words whitespace-pre-wrap">{agent.persona}</p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -142,6 +135,12 @@ export function ProposalPage({
         <p className="break-words">Rejected: {proposal.reason}</p>
       )}
       <Rounds rounds={proposal.rounds} />
+      {status !== "pending" && proposal.agents.length > 0 && (
+        <NewAgents
+          title={status === "approved" ? "Agents this plan added to your team" : "New agents it asked for"}
+          agents={proposal.agents}
+        />
+      )}
       <h2 className="font-semibold">Tasks</h2>
       <ul className="space-y-3">
         {proposal.plan.tasks.map((task) => (
@@ -174,6 +173,7 @@ function Decide({
     retry: false,
   });
   const [repository, setRepository] = useState(folder);
+  const [agents, setAgents] = useState<Agent[]>(proposal.agents);
   const [rights, setRights] = useState<Record<string, Rights>>(() =>
     Object.fromEntries(proposal.plan.tasks.map((t) => [t.id, NO_RIGHTS])),
   );
@@ -183,7 +183,7 @@ function Decide({
       queryClient.invalidateQueries({ queryKey: ["proposals"] }),
     ]);
   const approve = useMutation({
-    mutationFn: () => approveProposal(client, proposal.id, repository.trim(), rights),
+    mutationFn: () => approveProposal(client, proposal.id, repository.trim(), rights, agents),
     onSuccess: async () => {
       await reload();
       onStarted(proposal.id);
@@ -231,6 +231,31 @@ function Decide({
             onChange={(change) => set(task.id, change)}
           />
         ))}
+        {agents.length > 0 && (
+          <>
+            <h3 className="font-semibold">New agents for this plan</h3>
+            <p className="text-sm">
+              No agent on your team fits part of this work, so the lead agent wrote new ones.
+              Approving the plan adds them to your team; you can change them first.
+            </p>
+            {agents.map((agent, i) => (
+              <fieldset
+                key={agent.id}
+                className="space-y-2 rounded border border-slate-300 p-3 text-sm"
+              >
+                <legend className="px-1 font-medium break-all">
+                  {agent.id} · {agent.role}
+                </legend>
+                <AgentFields
+                  agent={agent}
+                  onChange={(change) =>
+                    setAgents((all) => all.map((a, j) => (j === i ? { ...a, ...change } : a)))
+                  }
+                />
+              </fieldset>
+            ))}
+          </>
+        )}
         <button type="submit" className={BUTTON} disabled={busy || !repository.trim()}>
           Approve and start
         </button>

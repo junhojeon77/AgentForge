@@ -132,6 +132,19 @@ describe("request", () => {
     expect(logged()).not.toContain("GET /runs answered");
   });
 
+  it("logs an agent save with its status, never the persona", async () => {
+    const { client } = setup([json(200, { id: "designer" })], [SECRET]);
+
+    await client.send("/agents/designer", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "designer", role: "design", persona: "SECRET-PERSONA" }),
+    });
+
+    expect(logged()).toContain("PUT /agents/designer answered 200");
+    expect(logged()).not.toContain("SECRET-PERSONA");
+  });
+
   it("never logs the token", async () => {
     const { client } = setup([json(401, {}), json(401, {})], [SECRET]);
 

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useMemo, useState } from "react";
+import { AgentsPage } from "./AgentsPage";
 import { API_BASE, createClient } from "./api/client";
 import { readToken } from "./api/token";
 import { type ConnectionState, POLL_MS, useConnection } from "./connection";
@@ -7,7 +8,7 @@ import { NewProposal, ProposalPage, STATUS } from "./ProposalPage";
 import type { Proposal } from "./proposals";
 import { BUTTON, problem, RunPage } from "./RunPage";
 
-type View = { kind: "run" | "proposal"; id: string } | { kind: "new" };
+type View = { kind: "run" | "proposal"; id: string } | { kind: "new" | "agents" };
 
 // Icon and words carry the state; color only repeats it.
 const STATES: Record<ConnectionState, { icon: string; text: string; tone: string }> = {
@@ -49,7 +50,7 @@ export function App() {
     view.kind === "proposal" ? proposals.data?.proposals.find((p) => p.id === view.id) : undefined;
   const openRun = (id: string) => setPicked({ kind: "run", id });
   const isOpen = (kind: View["kind"], id?: string) =>
-    view.kind === kind && (!id || (view.kind !== "new" && view.id === id));
+    view.kind === kind && (!id || ("id" in view && view.id === id));
 
   return (
     <div className="flex h-screen flex-col bg-white text-slate-900">
@@ -73,6 +74,14 @@ export function App() {
               className={`${BUTTON} w-full font-medium`}
             >
               Ask for something
+            </button>
+            <button
+              type="button"
+              aria-current={isOpen("agents") ? "page" : undefined}
+              onClick={() => setPicked({ kind: "agents" })}
+              className={`${BUTTON} w-full`}
+            >
+              Your team
             </button>
             {/* The page's h1 stays the first heading, so the lists are named by plain text. */}
             <div>
@@ -123,6 +132,8 @@ export function App() {
                 live={view.id === connected.active}
                 interrupted={view.id !== connected.active && connected.unfinished.includes(view.id)}
               />
+            ) : view.kind === "agents" ? (
+              <AgentsPage client={client} />
             ) : view.kind === "new" ? (
               <NewProposal
                 client={client}
@@ -130,7 +141,7 @@ export function App() {
                 onFolder={setFolder}
                 onCreated={(id) => setPicked({ kind: "proposal", id })}
               />
-            ) : shownPlan ? (
+            ) : view.kind !== "proposal" ? null : shownPlan ? (
               <ProposalPage
                 key={shownPlan.id}
                 client={client}

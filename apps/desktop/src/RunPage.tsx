@@ -405,6 +405,38 @@ export function ReasonForm({
   );
 }
 
+// Technical controls stay one click away; slice 7's first-start survey will choose whether
+// these start open.
+export function MoreOptions({ children }: { children: ReactNode }) {
+  return (
+    <details className="text-sm">
+      <summary className="cursor-pointer">More options</summary>
+      <div className="mt-2 space-y-2 border-l-2 border-slate-200 pl-3">{children}</div>
+    </details>
+  );
+}
+
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: (id: string) => ReactNode;
+}) {
+  const id = useId();
+  return (
+    <div className="flex flex-col gap-1 text-sm">
+      <label htmlFor={id} className="font-medium">
+        {label}
+      </label>
+      {children(id)}
+      {hint && <span className="text-slate-700">{hint}</span>}
+    </div>
+  );
+}
+
 /** A button that asks first, in place; focus returns to it if the person keeps things as they are. */
 export function Confirm({
   label,

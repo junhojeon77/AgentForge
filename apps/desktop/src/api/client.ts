@@ -21,10 +21,10 @@ function describe(detail: unknown): string | undefined {
   return detail.map((e) => `${(e.loc ?? []).join(".")}: ${e.msg}`).join("; ");
 }
 
-/** A POST with a JSON body; FastAPI parses a body as JSON only with this content type. */
-export function jsonBody(body: unknown): RequestInit {
+/** A request with a JSON body; FastAPI parses a body as JSON only with this content type. */
+export function jsonBody(body: unknown, method = "POST"): RequestInit {
   return {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   };

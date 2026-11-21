@@ -33,6 +33,7 @@ describe("approvalBody", () => {
     expect(approvalBody("C:/repo", { build: NO_RIGHTS })).toEqual({
       repository: "C:/repo",
       rights: { build: { allowed_operations: [], checks: [], max_attempts: 1 } },
+      agents: [],
     });
   });
 
@@ -53,6 +54,18 @@ describe("approvalBody", () => {
     const rights = { build: { ...NO_RIGHTS, runChecks: true } };
 
     expect(approvalBody("C:/repo", rights).rights.build.allowed_operations).toEqual([]);
+  });
+
+  it("sends the person's versions of the new agents", () => {
+    const designer = {
+      id: "designer",
+      role: "design",
+      model: "opus",
+      reasoning: "high" as const,
+      persona: "Draws calm screens",
+    };
+
+    expect(approvalBody("C:/repo", {}, [designer]).agents).toEqual([designer]);
   });
 
   it.each(["abc", "0", "-5"])("refuses the timeout %j instead of sending no limit", (timeout) => {
