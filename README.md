@@ -5,7 +5,9 @@ with five, and you can add, remove or fully customize any of them.
 
 **Status:** M1–M5 are implemented: a Python library (workers, worktrees, retries,
 pause/resume, saved runs with recovery, a lead agent that turns a request into a plan) and a
-local REST API with approvals and live events. The desktop app is planned, not built.
+local REST API with approvals and live events. The desktop app (M6) is in progress: its shell
+connects to the API and follows the active run live; the run, proposal and agent screens are
+planned.
 
 ## What is AgentForge
 
@@ -298,12 +300,28 @@ what is there, and the agent routes are under [Agents and personas](#agents-and-
 Endpoints and limits are in [the M5 doc](docs/milestones/M5-api.md) and
 [the M6 doc](docs/milestones/M6-desktop.md).
 
-### 10. Verify
+### 10. Open the desktop app
+
+Needs Node.js and Rust. Start the server (step 9) first, then:
+
+```powershell
+npm --prefix apps/desktop install
+npm --prefix apps/desktop run tauri dev
+```
+
+The window shows whether the server answers and follows the active run's events live. It reads
+the token from `%APPDATA%\AgentForge\api-token` again after each server restart. So far it is a
+shell: the run, proposal and agent screens come in later M6 slices. Details are in
+[the M6 doc](docs/milestones/M6-desktop.md).
+
+### 11. Verify
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest apps/api/tests
 .\.venv\Scripts\python.exe -m ruff check apps/api
 .\.venv\Scripts\python.exe -m ruff format --check apps/api
+npm --prefix apps/desktop test
+npm --prefix apps/desktop run build
 ```
 
 ## Agents and personas

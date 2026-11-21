@@ -5,7 +5,7 @@ This file gives instructions to AI coding assistants working on this project.
 ## Project Overview
 
 AgentForge is a planned local-first Windows platform where one lead agent coordinates specialized
-coding agents: five by default, and users can add, remove or fully customize any of them. M1–M5 (including the lead agent and the local REST API) are implemented in `apps/api/src/agentforge`. M6 (the desktop app) is in progress: only its first slice, the API additions, is built. LangGraph and LangChain are used only for the lead agent and the Claude Code Runnable interface; keep scheduling, saved runs and recovery in plain code.
+coding agents: five by default, and users can add, remove or fully customize any of them. M1–M5 (including the lead agent and the local REST API) are implemented in `apps/api/src/agentforge`. M6 (the desktop app, `apps/desktop`) is in progress: slice 1 (API additions) and slice 2 (the app shell: token, API client, live events, connection states) are built. LangGraph and LangChain are used only for the lead agent and the Claude Code Runnable interface; keep scheduling, saved runs and recovery in plain code.
 Everything else is planned. Keep AI reasoning separate from deterministic scheduling, validation,
 permissions and human approval.
 
@@ -35,7 +35,8 @@ permissions and human approval.
 Test public behavior, including boundary and failure cases. Use deterministic barriers, not
 sleeps, in async tests. Never weaken assertions, skip tests or change expectations to pass.
 
-**Done** means pytest and both Ruff checks pass, the diagnostics rule below is met, the diff is
+**Done** means pytest and both Ruff checks pass (plus the desktop test and build commands when
+`apps/desktop` changes), the diagnostics rule below is met, the diff is
 reviewed for correctness, unrelated changes and security, and exact results are reported, naming
 any check that was not run.
 
@@ -82,11 +83,14 @@ Python 3.11+, from the repository root in PowerShell:
 .\.venv\Scripts\python.exe -m pytest apps/api/tests
 .\.venv\Scripts\python.exe -m ruff check apps/api
 .\.venv\Scripts\python.exe -m ruff format --check apps/api
+npm --prefix apps/desktop test
+npm --prefix apps/desktop run build
 ```
 
-The demo, setup, serve, single-test and opt-in live test commands are in
+The demo, setup, serve, single-test, desktop dev and opt-in live test commands are in
 [CONTRIBUTING.md](CONTRIBUTING.md#commands), with the command for writing a new database migration.
-No type checker, frontend build or CI exists yet; don't invent commands for them.
+The desktop build runs `tsc`; no Python type checker or CI exists yet; don't invent commands for
+them.
 
 ## Docs
 

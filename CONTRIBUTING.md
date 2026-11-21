@@ -13,6 +13,12 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e "./apps/api[dev]"
 ```
 
+The desktop app also needs Node.js and Rust (with the MSVC build tools Tauri requires):
+
+```powershell
+npm --prefix apps/desktop install
+```
+
 ## Commands
 
 ```powershell
@@ -26,6 +32,9 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pytest apps/api/tests/test_scheduler.py::test_empty_plan   # single test
 .\.venv\Scripts\python.exe -m ruff check apps/api
 .\.venv\Scripts\python.exe -m ruff format --check apps/api
+npm --prefix apps/desktop test                                # desktop tests (Vitest)
+npm --prefix apps/desktop run build                           # desktop type check (tsc) + Vite build
+npm --prefix apps/desktop run tauri dev                       # open the desktop app
 ```
 
 The live Claude Code test is opt-in because it is billed to the logged-in Claude account:
@@ -37,8 +46,9 @@ $env:AGENTFORGE_CLAUDE = "$env:USERPROFILE\.vscode\extensions\anthropic.claude-c
 ```
 
 Pytest config lives in `apps/api/pyproject.toml` and sets `asyncio_mode = "auto"`, so async tests
-need no marker. Ruff targets py311 with line length 100 and rules `E F I UP B ASYNC`. There is no
-type checker, frontend build or CI yet.
+need no marker. Ruff targets py311 with line length 100 and rules `E F I UP B ASYNC`. The desktop
+app is type-checked with `tsc` (strict) as part of its build. There is no Python type checker or
+CI yet.
 
 Database migrations live in `apps/api/src/agentforge/migrations/versions/`. `RunStore` applies them
 itself. To write a new one after changing the tables in `store.py`:
@@ -62,7 +72,8 @@ Test public behavior, including boundary and failure cases. In async tests, use 
 barriers (such as `MockExecutor(gate=..., expected_starts=N)`), not sleeps. Never weaken
 assertions, skip tests or change expectations just to pass.
 
-A change is done when pytest and both Ruff checks pass, the diff has been reviewed for
+A change is done when pytest and both Ruff checks pass (and, for `apps/desktop`, its tests and
+build), the diff has been reviewed for
 correctness, unrelated changes and security, and the PR reports the exact results (with any checks
 that were not run named). Every change also updates every document it affects in the same piece
 of work: the README (usage), ROADMAP.md (status, deferred lists, verification history), every
@@ -261,8 +272,32 @@ Tests are in `apps/api/tests/`:
 - `test_validation.py`: the command validator. Its `hanging` fixture is a check that reports
   its pid over a local socket, a barrier for the timeout and cancellation tests.
 
+The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built with Vite.
+
+- **`src-tauri/`: the Rust shell.** `main.rs` only registers `tauri-plugin-fs`.
+  `capabilities/default.json` lets the window read one file, `$DATA/AgentForge/api-token`
+  (`$DATA` is `%APPDATA%`; `$APPDATA` would be the app's own folder). Bundling is off until M8.
+- **`src/api/client.ts`: `createClient({readToken, fetch})`.** `send` adds the bearer token,
+  re-reads it once after a 401 (the server writes a new one at every start) and turns failures
+  into `ApiError` with a `kind`: `no-token`, `offline`, `unauthorized` or `http` (with the
+  server's `detail`). `request` is `send` plus JSON.
+- **`src/api/events.ts`: `followEvents`.** It reads `GET /runs/{id}/events` with `fetch`, because
+  `EventSource` cannot send the token, and parses the frames itself. After a drop or a lost
+  server it waits and reconnects with `Last-Event-ID`; it stops at `end`, on abort, or on any
+  other refusal.
+- **`src/api/token.ts`**: `readToken()` through the fs plugin; `null` when there is no file.
+- **`src/connection.ts`: `useConnection`.** It polls `GET /runs` with TanStack Query and maps the
+  outcome to a state (`connectionState`); `logState` logs each change.
+- **`src/App.tsx`**: the status bar and the active run's live transitions.
+- **`src/log.ts`**: console lines prefixed `agentforge.desktop:`. Ids, statuses, paths and
+  reasons only, never the token or response text.
+
+Its tests sit next to the code (`*.test.ts`) and use a fake `fetch`, a fake token reader and
+an injected `wait`, with no timers: `client.test.ts`, `events.test.ts` and
+`connection.test.ts`.
+
 Delivered contracts and limits are in [M1-domain.md](docs/milestones/M1-domain.md),
 [M2-claude-code.md](docs/milestones/M2-claude-code.md),
 [M3-worktrees.md](docs/milestones/M3-worktrees.md),
-[M4-orchestration.md](docs/milestones/M4-orchestration.md) and
-[M5-api.md](docs/milestones/M5-api.md).
+[M4-orchestration.md](docs/milestones/M4-orchestration.md),
+[M5-api.md](docs/milestones/M5-api.md) and [M6-desktop.md](docs/milestones/M6-desktop.md).
