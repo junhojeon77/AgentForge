@@ -9,7 +9,7 @@ import {
   toId,
 } from "./agents";
 import type { Client } from "./api/client";
-import { BUTTON, Confirm, FIELD, Field, MoreOptions, problem } from "./RunPage";
+import { BUTTON, Confirm, FIELD, Field, MoreOptions, problem } from "./ui";
 
 const NEW_AGENT: Agent = { id: "", role: "", model: null, reasoning: "medium", persona: "" };
 
@@ -147,11 +147,11 @@ function AgentCard({
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
   });
   return (
-    <li className="space-y-1 rounded border border-slate-300 p-3 text-sm">
+    <li className="space-y-1 rounded border border-line p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="font-medium break-all">{agent.id}</h2>
         <span className="break-all">· {agent.role}</span>
-        <span className="text-slate-700">
+        <span className="text-ink-muted">
           · {agent.model ?? "default model"} · {agent.reasoning} reasoning
         </span>
         <button
@@ -174,7 +174,7 @@ function AgentCard({
       </div>
       {/* A persona is text written by a person or the lead agent: plain text, never HTML. */}
       {agent.persona && (
-        <p className="line-clamp-3 break-words whitespace-pre-wrap text-slate-700">
+        <p className="line-clamp-3 break-words whitespace-pre-wrap text-ink-muted">
           {agent.persona}
         </p>
       )}
@@ -211,7 +211,7 @@ function Editor({
   return (
     <form
       aria-label={agent ? `Edit agent ${agent.id}` : "New agent"}
-      className="space-y-3 rounded border border-slate-400 p-3"
+      className="space-y-3 rounded border border-line-strong p-3"
       onSubmit={(e) => {
         e.preventDefault();
         save.mutate();

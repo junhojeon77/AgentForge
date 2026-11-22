@@ -17,7 +17,7 @@ import {
   rejectProposal,
   roundsOf,
 } from "./proposals";
-import { BUTTON, Confirm, FIELD, Field, MoreOptions, problem, ReasonForm } from "./RunPage";
+import { BUTTON, Confirm, FIELD, Field, MoreOptions, problem, ReasonForm } from "./ui";
 
 export const STATUS = {
   pending: "Waiting for your OK",
@@ -55,11 +55,11 @@ function NewAgents({ title, agents }: { title: string; agents: Agent[] }) {
       <h2 className="font-semibold">{title}</h2>
       <ul className="space-y-2">
         {agents.map((agent) => (
-          <li key={agent.id} className="rounded border border-slate-300 p-3 text-sm">
+          <li key={agent.id} className="rounded border border-line p-3 text-sm">
             <p className="font-medium break-all">
               {agent.id} · {agent.role}
             </p>
-            <p className="text-slate-700">
+            <p className="text-ink-muted">
               {agent.model ?? "default model"} · {agent.reasoning} reasoning
             </p>
             {agent.persona && (
@@ -74,15 +74,15 @@ function NewAgents({ title, agents }: { title: string; agents: Agent[] }) {
 
 function TaskSummary({ task }: { task: PlanTask }) {
   return (
-    <li className="rounded border border-slate-300 p-3 text-sm">
+    <li className="rounded border border-line p-3 text-sm">
       <h3 className="font-medium break-all">{task.title}</h3>
-      <p className="text-slate-700 break-all">
+      <p className="text-ink-muted break-all">
         {task.id} · {task.role}
         {task.dependencies.length > 0 && ` · after ${task.dependencies.join(", ")}`}
       </p>
       {task.objective && <p className="break-words whitespace-pre-wrap">{task.objective}</p>}
       {task.description && (
-        <p className="break-words whitespace-pre-wrap text-slate-700">{task.description}</p>
+        <p className="break-words whitespace-pre-wrap text-ink-muted">{task.description}</p>
       )}
       {task.acceptance_criteria.length > 0 && (
         <>
@@ -241,7 +241,7 @@ function Decide({
             {agents.map((agent, i) => (
               <fieldset
                 key={agent.id}
-                className="space-y-2 rounded border border-slate-300 p-3 text-sm"
+                className="space-y-2 rounded border border-line p-3 text-sm"
               >
                 <legend className="px-1 font-medium break-all">
                   {agent.id} · {agent.role}
@@ -285,7 +285,7 @@ function TaskRights({
 }) {
   const names = Object.keys(checks);
   return (
-    <fieldset className="space-y-2 rounded border border-slate-300 p-3 text-sm">
+    <fieldset className="space-y-2 rounded border border-line p-3 text-sm">
       <legend className="px-1 font-medium break-all">
         {task.title} ({task.id})
       </legend>
@@ -300,7 +300,7 @@ function TaskRights({
       </label>
       <fieldset>
         <legend>Checks to run before its work is accepted</legend>
-        {names.length === 0 && <p className="text-slate-700">No checks are set up on the server.</p>}
+        {names.length === 0 && <p className="text-ink-muted">No checks are set up on the server.</p>}
         {names.map((name) => (
           <label key={name} className="flex flex-wrap items-center gap-2">
             <input
@@ -315,7 +315,7 @@ function TaskRights({
               }
             />
             {name}
-            <code className="text-xs text-slate-700">{checks[name].join(" ")}</code>
+            <code className="text-xs text-ink-muted">{checks[name].join(" ")}</code>
           </label>
         ))}
       </fieldset>
@@ -463,6 +463,8 @@ export function NewProposal({
         question="Plan this with the lead agent? It uses your Claude account, so it is billed."
         yes="Yes, plan it"
         keep="Not now"
+        destructive={false}
+        busy={ask.isPending}
         disabled={busy || !request.trim() || !folder.trim() || !runId.trim()}
         onConfirm={() => ask.mutate()}
       />
