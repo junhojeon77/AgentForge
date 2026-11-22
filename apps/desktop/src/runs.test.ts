@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api/client";
 import {
   attemptStartsOpen,
+  diffLines,
   diffStats,
-  diffTone,
   failureLabel,
   retriesLeft,
+  reviewAttempt,
   runSummary,
   STATUS,
   sendControl,
@@ -109,20 +110,72 @@ describe("sendControl", () => {
   });
 });
 
-describe("diffTone", () => {
+describe("diffLines", () => {
+  it("tones each line by where it is: headers outside a hunk, changes inside one", () => {
+    const diff = [
+      "diff --git a/schema.sql b/schema.sql",
+      "new file mode 100644",
+      "index 0000000..5d6e7f8",
+      "--- /dev/null",
+      "+++ b/schema.sql",
+      "@@ -0,0 +1,3 @@",
+      "+create table users;",
+      // Inside a hunk these are a removed "-- note" and an added "++ x", not file headers.
+      "--- note",
+      "+++ x",
+      " kept",
+      "\\ No newline at end of file",
+      "@@ -9 +9 @@",
+      "-old",
+      "diff --git a/b.txt b/b.txt",
+      "--- a/b.txt",
+      "+++ b/b.txt",
+      "@@ -1 +1 @@",
+      "+y",
+      "",
+    ].join("\n");
+
+    expect(diffLines(diff).map((line) => line.tone)).toEqual([
+      "file",
+      "file",
+      "file",
+      "file",
+      "file",
+      "hunk",
+      "added",
+      "removed",
+      "added",
+      null,
+      null,
+      "hunk",
+      "removed",
+      "file",
+      "file",
+      "file",
+      "hunk",
+      "added",
+      null,
+    ]);
+    expect(diffLines(diff)[7]).toEqual({ text: "--- note", tone: "removed" });
+  });
+});
+
+describe("reviewAttempt", () => {
+  const task = (status: TaskStatus) => ({ status, attempt_number: 2 });
+  const attempts = [{ number: 1 }, { number: 2 }];
+
+  it("is the latest attempt while the task waits for review on the active run", () => {
+    expect(reviewAttempt(task("AWAITING_APPROVAL"), true, attempts)).toBe(2);
+  });
+
   it.each([
-    ["+added line", "added"],
-    ["-removed line", "removed"],
-    ["@@ -1,2 +1,3 @@", "hunk"],
-    // File headers are tested before + and -, so they are never read as added or removed.
-    ["diff --git a/app.py b/app.py", "file"],
-    ["index 1a2b3c4..5d6e7f8 100644", "file"],
-    ["+++ b/app.py", "file"],
-    ["--- a/app.py", "file"],
-    [" unchanged line", null],
-    ["", null],
-  ] as const)("%j is %s", (line, tone) => {
-    expect(diffTone(line)).toBe(tone);
+    // After a refused approve the reload shows the task elsewhere, so the band is gone and
+    // the refusal must show under the card's buttons.
+    ["the task left review", task("RUNNING"), true, attempts],
+    ["the run is not active", task("AWAITING_APPROVAL"), false, attempts],
+    ["the waiting attempt is not listed", task("AWAITING_APPROVAL"), true, [{ number: 1 }]],
+  ] as const)("is null when %s", (_why, state, live, listed) => {
+    expect(reviewAttempt(state, live, listed)).toBeNull();
   });
 });
 
@@ -147,6 +200,20 @@ describe("diffStats", () => {
     ].join("\n");
 
     expect(diffStats(diff)).toEqual({ files: 2, added: 3, removed: 2 });
+  });
+
+  it("counts a removed '-- note' and an added '++ x' inside a hunk as changed lines", () => {
+    const diff = [
+      "diff --git a/schema.sql b/schema.sql",
+      "--- a/schema.sql",
+      "+++ b/schema.sql",
+      "@@ -1,2 +1,2 @@",
+      "--- note",
+      "+++ x",
+      " kept",
+    ].join("\n");
+
+    expect(diffStats(diff)).toEqual({ files: 1, added: 1, removed: 1 });
   });
 });
 

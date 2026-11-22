@@ -20,7 +20,7 @@ const SERVE = String.raw`.\.venv\Scripts\python.exe -m agentforge serve --worktr
 const QUIET = "border-line bg-panel text-ink";
 const TROUBLE = "border-problem-edge bg-problem-soft text-problem-ink";
 
-// Words carry the state; the icon and colour only repeat it. Text in backticks is code.
+// Words carry the state; the icon and colour only repeat it.
 const STATES: Record<ConnectionState, { icon: IconName; iconTone: string; bar: string; text: string }> =
   {
     connecting: {
@@ -33,7 +33,9 @@ const STATES: Record<ConnectionState, { icon: IconName; iconTone: string; bar: s
       icon: "no-token",
       iconTone: "",
       bar: "border-needs-edge bg-needs-soft text-needs-ink",
-      text: "No token yet: start the server with `python -m agentforge serve`",
+      // The disconnected screen below has the steps and the full command; a short one here
+      // would fail without --worktrees.
+      text: "No token yet: start the server (steps below)",
     },
     offline: { icon: "offline", iconTone: "", bar: TROUBLE, text: `Server offline at ${HOST}` },
     unauthorized: {
@@ -116,9 +118,7 @@ export function App() {
     void refetch().finally(() => setReconnecting(false));
   };
 
-  const full =
-    shown.text.replaceAll("`", "") +
-    (state === "failed" && error?.status ? ` (${error.status}: ${error.detail})` : "");
+  const suffix = state === "failed" && error?.status ? ` (${error.status}: ${error.detail})` : "";
   const tabs = [
     {
       id: "runs" as const,
@@ -142,22 +142,13 @@ export function App() {
         <p
           role="status"
           aria-live="polite"
-          title={full}
+          title={shown.text + suffix}
           className="flex min-w-0 items-center gap-2 text-control font-semibold"
         >
           <Icon name={shown.icon} className={`size-4 shrink-0 ${shown.iconTone}`} />
           <span className="truncate">
-            {shown.text.split("`").map((part, i) =>
-              // Odd parts were inside backticks.
-              i % 2 ? (
-                <code key={part} className="font-mono">
-                  {part}
-                </code>
-              ) : (
-                part
-              ),
-            )}
-            {state === "failed" && error?.status ? ` (${error.status}: ${error.detail})` : ""}
+            {shown.text}
+            {suffix}
           </span>
         </p>
         <Button small busy={reconnecting} disabled={reconnecting} onClick={reconnect}>

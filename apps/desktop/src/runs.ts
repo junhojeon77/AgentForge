@@ -126,25 +126,43 @@ export function attemptStartsOpen(
   return working || task.status === "AWAITING_APPROVAL";
 }
 
+/** The attempt whose review band is on screen, or null. A refused approve or reject shows in the
+ * band only while it is there; the server usually refuses because the task left review, and
+ * then the reload removes the band. */
+export function reviewAttempt(
+  task: { status: TaskStatus; attempt_number: number },
+  live: boolean,
+  attempts: readonly { number: number }[],
+): number | null {
+  const waits = taskActions(task.status, live, task.attempt_number).includes("approve");
+  return waits && attempts.some((a) => a.number === task.attempt_number)
+    ? task.attempt_number
+    : null;
+}
+
 export type DiffTone = "file" | "hunk" | "added" | "removed";
 
-const FILE_HEADER = /^(diff --git |index |--- |\+\+\+ )/;
-
-export function diffTone(line: string): DiffTone | null {
-  // Headers first: "---" and "+++" would otherwise read as a removed or added line.
-  if (FILE_HEADER.test(line)) return "file";
-  if (line.startsWith("+")) return "added";
-  if (line.startsWith("-")) return "removed";
-  return line.startsWith("@@") ? "hunk" : null;
+/** Each line of a git diff with its tone, decided by where it is: outside a hunk every line is a
+ * file header; inside one, a removed "-- note" reads "--- note" and is still a removed line. */
+export function diffLines(diff: string): { text: string; tone: DiffTone | null }[] {
+  let inHunk = false;
+  return diff.split("\n").map((text) => {
+    // Hunk lines start with " ", "+", "-" or "\", so these can only begin a file or a hunk.
+    if (text.startsWith("diff --git ")) inHunk = false;
+    else if (text.startsWith("@@")) inHunk = true;
+    if (!inHunk) return { text, tone: "file" };
+    if (text.startsWith("@@")) return { text, tone: "hunk" };
+    if (text.startsWith("+")) return { text, tone: "added" };
+    return { text, tone: text.startsWith("-") ? "removed" : null };
+  });
 }
 
 export function diffStats(diff: string): { files: number; added: number; removed: number } {
   const stats = { files: 0, added: 0, removed: 0 };
-  for (const line of diff.split("\n")) {
-    const tone = diffTone(line);
+  for (const { text, tone } of diffLines(diff)) {
     if (tone === "added") stats.added++;
     else if (tone === "removed") stats.removed++;
-    else if (line.startsWith("diff --git ")) stats.files++;
+    else if (text.startsWith("diff --git ")) stats.files++;
   }
   return stats;
 }

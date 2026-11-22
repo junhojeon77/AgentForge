@@ -7,13 +7,14 @@ import { log } from "./log";
 import {
   attemptStartsOpen,
   type DiffTone,
+  diffLines,
   diffStats,
-  diffTone,
   failureLabel,
   type Group,
   type RunAction,
   type RunReport,
   retriesLeft,
+  reviewAttempt,
   runSummary,
   STATUS,
   sendControl,
@@ -348,6 +349,9 @@ function TaskCard({
   const failure = state.failure_reason;
   const reviewing =
     control.variables?.action === "approve" || control.variables?.action === "reject";
+  const banded = reviewAttempt(state, live, attempts);
+  // A review refusal shows in the band only while the band is on screen.
+  const inBand = reviewing && banded !== null;
   const finished = status === "FAILED" || status === "CANCELLED";
   const newestFirst = [...attempts].sort((a, b) => b.number - a.number);
 
@@ -455,7 +459,7 @@ function TaskCard({
           )}
         </div>
       )}
-      {!reviewing && (
+      {!inBand && (
         <div className="mt-2">
           <Refusal control={control} object={`task ${task.id}`} />
         </div>
@@ -463,7 +467,7 @@ function TaskCard({
       {newestFirst.length > 0 && (
         <div className="mt-3 divide-y divide-line border-t border-line">
           {newestFirst.map((attempt) => {
-            const review = actions.includes("approve") && attempt.number === state.attempt_number;
+            const review = attempt.number === banded;
             const latest = attempt.number === state.attempt_number;
             return (
               <Attempt
@@ -483,7 +487,7 @@ function TaskCard({
                     onApprove={() => send("approve")}
                     onReject={(reason) => send("reject", reason)}
                   >
-                    {reviewing && <Refusal control={control} object={`task ${task.id}`} />}
+                    {inBand && <Refusal control={control} object={`task ${task.id}`} />}
                   </ReviewBand>
                 )}
               </Attempt>
@@ -590,18 +594,15 @@ function DiffView({ diff, where, folded }: { diff: string; where: string; folded
       >
         {/* The inner block is as wide as the longest line, so line colours span the scroll. */}
         <code className="inline-block min-w-full py-1">
-          {diff.split("\n").map((line, i) => {
-            const tone = diffTone(line);
-            return (
-              // Lines never move or change, so their position is a stable key.
-              <span
-                key={i}
-                className={`block px-3 whitespace-pre ${tone ? TONES[tone] : "text-diff-ctx-ink"}`}
-              >
-                {line || " "}
-              </span>
-            );
-          })}
+          {diffLines(diff).map(({ text, tone }, i) => (
+            // Lines never move or change, so their position is a stable key.
+            <span
+              key={i}
+              className={`block px-3 whitespace-pre ${tone ? TONES[tone] : "text-diff-ctx-ink"}`}
+            >
+              {text || " "}
+            </span>
+          ))}
         </code>
       </pre>
     </div>
