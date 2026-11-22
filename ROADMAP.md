@@ -12,9 +12,9 @@ home. The app leads with the plain path and keeps every technical control one cl
 first-start survey (planned, M6 slice 7) lets each person choose whether those controls start
 open.
 
-AgentForge is built in milestones. M1 to M5 are implemented, and M6's first five slices (the API
-additions for the desktop app, the app's shell, the run screens, the proposal screens and the
-agent editor). The rest is direction, not a promise, and not permission to start
+AgentForge is built in milestones. M1 to M5 are implemented, and M6's first six slices (the API
+additions for the desktop app, the app's shell, the run screens, the proposal screens, the
+agent editor and the visual design of the frame and run screens). The rest is direction, not a promise, and not permission to start
 a later milestone early (see [GOVERNANCE.md](GOVERNANCE.md)).
 
 | Milestone | Scope | Status |
@@ -24,14 +24,15 @@ a later milestone early (see [GOVERNANCE.md](GOVERNANCE.md)).
 | M3 | One Git worktree per task, edit-capable workers that may run only their own checks, recorded diffs, a validator that runs check commands | Implemented within [documented limits](docs/milestones/M3-worktrees.md) |
 | M4 | Lead orchestration, retries, pause/resume, persistence and recovery | Retries, pause/resume, persistence and recovery implemented within [documented limits](docs/milestones/M4-orchestration.md); the lead agent implemented on 2026-11-15 |
 | M5 | FastAPI REST commands, approvals and SSE events | Implemented within [documented limits](docs/milestones/M5-api.md) on 2026-11-15 |
-| M6 | Tauri 2 desktop dashboard (React, TypeScript), including on-screen agent editing | In progress: slice 1 (API additions) implemented on 2026-11-15, slice 2 (the app shell in `apps/desktop`) on 2026-11-18, slice 3 (the run screens, plain styling), slice 4 (the proposal screens: ask for something, approve with rights) and slice 5 (the agent editor, and new agents from the lead) on 2026-11-20; a visual design and a first-start survey and guide (plain or technical view) are planned. See [the M6 doc](docs/milestones/M6-desktop.md) |
+| M6 | Tauri 2 desktop dashboard (React, TypeScript), including on-screen agent editing | In progress: slice 1 (API additions) implemented on 2026-11-15, slice 2 (the app shell in `apps/desktop`) on 2026-11-18, slice 3 (the run screens, plain styling), slice 4 (the proposal screens: ask for something, approve with rights) and slice 5 (the agent editor, and new agents from the lead) on 2026-11-20, slice 6 (the visual design of the frame and the run screens) on 2026-11-21; a design for Ask for something, plans and Your team, and a first-start survey and guide (plain or technical view) are planned. See [the M6 doc](docs/milestones/M6-desktop.md) |
 | M7 | Integration candidates, conflict detection, review and approved integration | Planned |
 | M8 | Windows packaging, backend lifecycle, secure local communication and recovery checks | Planned |
 
 SQLAlchemy and Alembic were added for M4's persistence, and LangGraph and LangChain core for the
 lead agent, and FastAPI and uvicorn for M5, on 2026-11-15. For M6's shell, on 2026-11-18: Tauri 2
 with `tauri-plugin-fs`, React, TypeScript, Vite, Tailwind, TanStack Query and Vitest. shadcn/ui
-waits for a screen that needs a composite widget (slice 3 used native elements), and Zustand for a screen that needs shared client state. Add each only when
+waits for a screen that needs a composite widget (slices 3 to 6 used native elements, slice 6's
+side-list tabs included), and Zustand for a screen that needs shared client state. Add each only when
 its milestone is approved.
 
 ## Deferred from built milestones
@@ -72,6 +73,11 @@ are in the [M5 doc](docs/milestones/M5-api.md#not-implemented-yet).
   calls the existing `agentforge.personas` functions.
 
 ## Verification history
+
+Verified on 2026-11-21 after M6 slice 6 (the visual design of the frame and the run screens):
+**128 Vitest tests passed** (43 new), and the desktop `tsc` type check and Vite build passed. The
+backend is unchanged: **250 tests passed and 1 skipped**, Ruff lint passed, and all 31 Python
+files passed the formatting check. No billed call was made.
 
 Verified on 2026-11-20 after M6 slice 5 (the agent editor, and new agents from the lead):
 **250 tests passed and 1 skipped** (15 new), Ruff lint passed, and all 31 Python files passed

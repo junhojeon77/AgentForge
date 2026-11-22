@@ -305,16 +305,27 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
 - **`src/api/token.ts`**: `readToken()` through the fs plugin; `null` when there is no file.
 - **`src/connection.ts`: `useConnection`.** It polls `GET /runs` with TanStack Query and maps the
   outcome to a state (`connectionState`); `logState` logs each change.
-- **`src/runs.ts`: the run page's rules.** The report types, `taskActions(status, live)` (which
-  controls a task offers, mirroring the scheduler), `diffTone(line)` and
+- **`src/runs.ts`: the run page's rules.** The report types, `taskActions(status, live,
+  attempt)` (which controls a task offers, mirroring the scheduler, Retry only below 5
+  attempts), `STATUS` (each status's words and colour group), `failureLabel`, `runSummary`,
+  `retriesLeft`, `attemptStartsOpen`, `diffTone(line)` and `diffStats`, `stripAnsi`, and
   `sendControl(client, runId, action, task?, reason?)`, which POSTs a run or task control.
-- **`src/RunPage.tsx`: one run.** It reads `GET /runs/{id}` with TanStack Query and, while the
-  run is active, reloads it on every `followEvents` event. Task cards, every attempt with its
-  diff, the review box, an inline confirm for Cancel, and the history. `useControl` gives the
-  header and each card their own pending state and refusal. It also exports the pieces the
-  other screens reuse: `Confirm` (asks first, in place), `ReasonForm` (a required reason),
-  `problem` (an error in words), `MoreOptions` (technical fields, folded), `Field` (a labelled
-  field with a hint), `BUTTON` and `FIELD`.
+- **`src/RunPage.tsx`: one run.** `runQuery` reads `GET /runs/{id}` with TanStack Query (the side
+  list shares it for the active run's count); while the run is active, the page reloads it on
+  every `followEvents` event. The header, task cards, every attempt with its diff, the review
+  band and the history with its task filter. `useControl` gives the header and each card their
+  own pending state and refusal.
+- **`src/ui.tsx`: the pieces every screen shares.** `Button` (primary, secondary, destructive,
+  confirm, ghost; busy shows the static arc), `StatusBadge`, `NeedsCount`, `Alert`,
+  `CopyButton` and `copyText` (a failure logged by name, never the text), `Confirm` (asks first,
+  in place, focus on the safe answer), `ReasonForm` (a required reason), `problem` (an error in
+  words), `MoreOptions` (technical fields, folded), `Field` (a labelled field with a hint),
+  `BUTTON` and `FIELD`.
+- **`src/index.css` and `src/Icon.tsx`: the design.** The Tailwind v4 theme from
+  [docs/design/agentforge](docs/design/agentforge/README.md): only its colours exist (Tailwind's
+  default palette is removed, and an unknown class is silently ignored, so use the design's
+  names), dark follows Windows through `prefers-color-scheme`, system fonts only. `Icon` is the
+  design's stroke icon set; every icon sits beside a word.
 - **`src/proposals.ts`: the proposal screens' rules.** The proposal types, `Rights` and
   `NO_RIGHTS`, `approvalBody(repository, rights, agents)` (the approve body, refusing a bad timeout),
   `parsePlan`, `newRunId`, `planTemplate`, `roundsOf(error)` and one function per request:
@@ -327,14 +338,16 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
 - **`src/AgentsPage.tsx`: Your team.** The list, the inline editor and remove; `AgentFields`
   (how it should work, and model and reasoning under More options) is shared with the plan
   page's new agents, whose role stays as proposed; the editor adds the role.
-- **`src/App.tsx`**: the status bar, the side list (Ask for something, Your team, runs, plans, the plans
-  polled with `GET /runs`) and the selected page; with no run yet it opens Ask for something.
+- **`src/App.tsx`**: the status bar, the "can't reach its server" screen, the side list (Ask for
+  something, Your team, and the Runs and Plans tabs with their counts of what waits for you; the
+  plans and the active run's report polled with `GET /runs`) and the selected page; with no run
+  yet it opens Ask for something.
 - **`src/log.ts`**: console lines prefixed `agentforge.desktop:`. Ids, statuses, paths and
   reasons only, never the token or response text.
 
 Its tests sit next to the code (`*.test.ts`) and use a fake `fetch`, a fake token reader and
 an injected `wait`, with no timers: `client.test.ts`, `events.test.ts`, `connection.test.ts`,
-`runs.test.ts`, `proposals.test.ts` and `agents.test.ts`. The components have no tests of their own; `tsc` checks them.
+`runs.test.ts`, `proposals.test.ts`, `agents.test.ts` and `ui.test.ts`. The components have no tests of their own; `tsc` checks them.
 
 Delivered contracts and limits are in [M1-domain.md](docs/milestones/M1-domain.md),
 [M2-claude-code.md](docs/milestones/M2-claude-code.md),

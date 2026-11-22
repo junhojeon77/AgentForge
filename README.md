@@ -16,7 +16,8 @@ local REST API with approvals and live events. The desktop app (M6) is in progre
 runs and follows each one live, with its diffs to approve or reject and controls to pause,
 cancel, retry or recover work, and starts runs: ask for something in plain words, then approve
 the lead agent's plan with the rights each task gets, and edits your team of agents (the lead
-agent can propose a new one with a plan). A visual design and a first-start survey and guide
+agent can propose a new one with a plan). Its frame and run screens follow the visual design
+(dark when Windows is dark); a design for the remaining screens and a first-start survey and guide
 are planned.
 
 ## What is AgentForge

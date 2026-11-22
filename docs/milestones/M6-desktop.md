@@ -14,11 +14,62 @@ technical control one click away, under **More options** or a "for developers" s
 | 3 | Runs: list, run page, controls, diff review | Implemented on 2026-11-20, with plain styling |
 | 4 | Proposals: list, detail, new from a request or by hand, approve with rights | Implemented on 2026-11-20, with plain styling |
 | 5 | Agent editor ("Your team"), and new agents the lead agent proposes with a plan | Implemented on 2026-11-20, with plain styling |
-| 6 | Visual design of every screen, from a Claude Design pass | Planned |
+| 6 | Visual design of the frame and the run screens, from a Claude Design pass | Implemented on 2026-11-21; Ask for something, plans and Your team wait for their own design |
 | 7 | First-start survey and guide: choose the plain or technical view (whether **More options** starts open), changeable later | Planned |
 
 Slice 1 is the API side, slice 2 the app's shell, slice 3 the run screens, slice 4 the proposal
-screens and slice 5 the agent editor. The app's look is deliberately plain until slice 6.
+screens, slice 5 the agent editor and slice 6 the visual design of the frame and the run screens.
+Ask for something, the plan page and Your team keep their plain layout until their own design
+pass; they already use the theme's colours and the restyled buttons and fields.
+
+## Delivered behavior (slice 6)
+
+**The design.** It comes from a Claude Design pass and is kept in
+[docs/design/agentforge](../design/agentforge/README.md): the rules, tokens, a guide per component
+and static previews. The app follows it:
+
+- **Colour only where it means something.** Quiet graphite everywhere; petrol for actions and work
+  in progress; amber only for what needs you (a diff waiting for review, a plan waiting for your
+  OK, an interrupted run, No token, "Live updates stopped"); red for trouble. A status is always
+  a word ("Awaiting approval"), and its colour and icon only repeat it. Only Needs you, Working
+  and Problem badges are filled.
+- **Dark when Windows is dark.** The theme follows the Windows app setting; there is no toggle.
+- **System fonts only** (Segoe UI Variable, Cascadia Mono), so nothing loads from the network.
+- **Every control can be reached with the keyboard** and shows a focus ring; every icon sits beside
+  a word.
+
+**The frame.** The status bar keeps its six texts, now with an icon and colour per state;
+**Reconnect** shows it is busy only for its own click. While the server cannot be reached (any
+state but Connected and Connecting), the window says "AgentForge can't reach its server" with
+three steps and a **Copy command** button for the full `serve` command. The side list has **Ask
+for something**, **Your team**, then two tabs, **Runs** and **Plans** (arrow keys switch them).
+Each tab shows an amber count of what waits for you: diffs on the active run, plans waiting for
+your OK. Opening a run or a plan switches to its tab; each tab keeps its scroll position. The
+active run's item shows its own count of waiting diffs.
+
+**The run page.** The header shows "Run <id>" with **Copy run id**, the state as a badge and a
+summary ("5 tasks · 1 completed · 2 waiting for you"), and the run's controls; **Recover run** is
+the page's one primary button. Each task card shows its status in words, then Task, Agent,
+Attempt, its rights, its checks and the tasks it waits for ("After `build`"), a failure in plain
+words with its code ("A check failed · `validation_rejected`") and its latest note. A task
+waiting for review has an amber border. **Retry** says how many attempts are left ("2 more
+attempts allowed (5 at most)") and is not offered once all 5 are used, since the server would
+refuse it.
+
+- **Attempts, newest first.** The latest opens while it runs or waits for review; earlier ones
+  open while the latest runs, so a reject reason stays readable. Each shows its reason ("Your
+  reason", "Check output" or "Agent error"), the agent's report and the diff, folded unless it
+  waits for review. Colour codes in output are removed, never interpreted.
+- **The diff** has its own scroll box, a line count ("3 files · +40 −12") and **Copy diff**; file
+  headers, hunks, added and removed lines each have their tone.
+- **The review band** sits under the waiting diff: **Approve diff**, or **Reject diff**, which
+  opens the reason box in place (Escape goes back; a refused reject keeps the text).
+- **Cancel asks first** with the focus on the safe answer ("Keep it", "Keep running"); Escape
+  keeps.
+- **A refusal** shows under the buttons that were used, "Server refused Retry for task build:
+  <detail>", until **Dismiss** or the next click there.
+- **History** is a table in its own scroll box with a sticky header and a **Show task** filter;
+  on a live run it stays at the bottom only if you were already there.
 
 ## Delivered behavior (slice 5)
 
@@ -196,7 +247,7 @@ one default in a new profile keeps the other four.
 | `agentforge.api` | DEBUG | `api: run <id> starts with agents <ids>` |
 | `agentforge.api` | DEBUG | A refused agent request or a broken persona file: the existing `<method> <path> answered <status>`; the detail, which can quote the file, is never logged |
 
-### The desktop app (slices 2 to 5)
+### The desktop app (slices 2 to 6)
 
 | Question | Where the answer is |
 |---|---|
@@ -207,7 +258,8 @@ one default in a new profile keeps the other four.
 | Why did my click do nothing? | The server refused it: its `detail` is shown next to the control, and the console has `POST <path> answered <status>` |
 | Did the app send my approve, pause or retry? | The console's `POST /runs/<id>/tasks/<task>/<action> answered 200`; the run's History shows the server's reason, such as `approve_task was called` |
 | Where did my reject reason go? | Under that attempt, as its reason (`TaskAttempt.message`); the next attempt is told it. It is never logged |
-| Why is a button missing? | Controls show only when the server would accept them; see the table under slice 3's delivered behavior |
+| Why is a button missing? | Controls show only when the server would accept them; see the table under slice 3's delivered behavior. A task that used all 5 attempts says "All 5 attempts used" instead of offering Retry |
+| Why did Copy not work? | The message next to the button ("Could not copy: …"); the console has `copy <what> failed: <error name>` |
 | Why was my plan not made? | The message under **Plan it** and, under it, each round's issues (the 422's `rounds`); the console has `POST /proposals/from-request answered 422` |
 | Why was my hand-written plan refused? | The message under **Save the plan**: `not valid JSON: …` (never sent), the rule that broke (400) or the field errors (422) |
 | Why did Approve and start fail? | The `detail` under the form: a run already active (409), an unknown check or a missing folder (400) |
@@ -230,6 +282,7 @@ one default in a new profile keeps the other four.
 | debug | `token file %APPDATA%\AgentForge\api-token could not be read` |
 | debug | `events for run <id> dropped after <sequence>; reconnecting` / `events for run <id> ended after <sequence>` |
 | warn | `events for run <id> stopped: <status or kind>` |
+| warn | `copy <what> failed: <error name>`: never the copied text, since a diff can hold secrets |
 
 The token, request and response bodies (a reject reason, a request's text, a plan among them),
 field errors, the lead agent's rounds, diffs, worker reports and transition details are never
@@ -263,7 +316,12 @@ logged.
 - **A new agent the lead proposes cannot be dropped at approval, nor its role changed;** change
   how it works, or reject the plan and ask again.
 - **Every technical control starts folded** until slice 7's survey lets each person choose.
-- **The look is plain** until slice 6's design pass.
+- **Ask for something, the plan page and Your team keep their plain layout** until their own
+  design pass; only their colours and shared buttons and fields follow the design.
+- **The active run's report is read every 2 seconds** for the waiting-diffs count, on top of the
+  reloads its live events cause.
+- **The theme follows Windows;** there is no light or dark switch in the app.
+- **A diff is drawn in full,** every line, however long.
 - **The token path is fixed** to the real `%APPDATA%`. A server started with a different
   `APPDATA` writes a token the app cannot see.
 - **The app is run with `tauri dev`;** no installer is built (M8).
@@ -272,14 +330,23 @@ logged.
 
 | Deferred | Waits for |
 |---|---|
-| A visual design | Slice 6 |
+| A visual design for Ask for something, the plan page and Your team | Their own Claude Design pass |
 | A first-start survey and guide (plain or technical view) | Slice 7 |
 | A command-line option for allowed origins | When a second client needs it |
 
 ## Acceptance checks
 
 Run the pytest and Ruff commands in the root README, plus `npm --prefix apps/desktop test` and
-`npm --prefix apps/desktop run build`. Slice 5's tests:
+`npm --prefix apps/desktop run build`. Slice 6's tests:
+
+- `runs.test.ts`: every diff line's tone, with file headers (`diff --git`, `index`, `---`,
+  `+++`) found before added and removed lines; the file and line counts; each of the 11 statuses'
+  words and group; the seven failure labels and an unknown code; the run summary; Retry offered
+  after 4 attempts and not after 5; the attempts-left text; colour codes removed with HTML kept
+  as text; which attempts start open.
+- `ui.test.ts`: a copy that works, and one that fails logged by the error's name, never the text.
+
+The new look has no tests of its own; `tsc` and the window check cover it. Slice 5's tests:
 
 - `test_lead.py`: a draft adding an agent for a role no agent has, accepted with the agent, the
   critique shown it, its count logged and its persona not; the check's issue for a bad name, a
