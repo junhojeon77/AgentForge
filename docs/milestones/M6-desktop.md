@@ -38,7 +38,9 @@ and static previews. The app follows it:
 - **Every control can be reached with the keyboard** and shows a focus ring; every icon sits beside
   a word.
 
-**The frame.** The status bar keeps its six texts, now with an icon and colour per state;
+**The frame.** The status bar keeps its six states, now with an icon and colour per state; No
+token now reads "No token yet: start the server (steps below)", since the short command it gave
+fails without `--worktrees`;
 **Reconnect** shows it is busy only for its own click. While the server cannot be reached (any
 state but Connected and Connecting), the window says "AgentForge can't reach its server" with
 three steps and a **Copy command** button for the full `serve` command. The side list has **Ask
@@ -339,8 +341,10 @@ logged.
 Run the pytest and Ruff commands in the root README, plus `npm --prefix apps/desktop test` and
 `npm --prefix apps/desktop run build`. Slice 6's tests:
 
-- `runs.test.ts`: every diff line's tone, with file headers (`diff --git`, `index`, `---`,
-  `+++`) found before added and removed lines; the file and line counts; each of the 11 statuses'
+- `runs.test.ts`: every diff line's tone by where it is (outside a hunk a file header, `new
+  file mode` included; inside one a removed `--- note` and an added `+++ x` stay changes); the
+  file and line counts, those two lines included; the attempt whose review band is on screen,
+  and none once the task left review (a refused approve then shows under the card); each of the 11 statuses'
   words and group; the seven failure labels and an unknown code; the run summary; Retry offered
   after 4 attempts and not after 5; the attempts-left text; colour codes removed with HTML kept
   as text; which attempts start open.

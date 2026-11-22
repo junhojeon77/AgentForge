@@ -78,7 +78,7 @@ Show the plain label, with the code in `code` after it: "A check failed · `vali
 | Removed | `-` | `diff-del-soft`, `diff-del-ink` |
 | Context | anything else | `code-bg`, `diff-ctx-ink` |
 
-Check `---`/`+++` before `-`/`+`. The `+` and `-` stay in the text; colour only repeats them.
+File headers are the lines from `diff --git` to the first `@@` of each file; inside a hunk only the first character decides, so a removed line that starts with `--` is still a removed line. The `+` and `-` stay in the text; colour only repeats them.
 
 ## Type
 

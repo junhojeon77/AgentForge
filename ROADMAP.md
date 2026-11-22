@@ -75,7 +75,7 @@ are in the [M5 doc](docs/milestones/M5-api.md#not-implemented-yet).
 ## Verification history
 
 Verified on 2026-11-21 after M6 slice 6 (the visual design of the frame and the run screens):
-**128 Vitest tests passed** (43 new), and the desktop `tsc` type check and Vite build passed. The
+**125 Vitest tests passed** (40 new), and the desktop `tsc` type check and Vite build passed. The
 backend is unchanged: **250 tests passed and 1 skipped**, Ruff lint passed, and all 31 Python
 files passed the formatting check. No billed call was made.
 

@@ -308,7 +308,10 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
 - **`src/runs.ts`: the run page's rules.** The report types, `taskActions(status, live,
   attempt)` (which controls a task offers, mirroring the scheduler, Retry only below 5
   attempts), `STATUS` (each status's words and colour group), `failureLabel`, `runSummary`,
-  `retriesLeft`, `attemptStartsOpen`, `diffTone(line)` and `diffStats`, `stripAnsi`, and
+  `retriesLeft`, `attemptStartsOpen`, `reviewAttempt` (the attempt whose review band is on
+  screen, so a refused approve shows under the card once the band is gone), `diffLines(diff)`
+  (each line's tone by where it is: outside a hunk a file header, inside one a change, so a
+  removed `-- note` stays a removed line) and `diffStats`, `stripAnsi`, and
   `sendControl(client, runId, action, task?, reason?)`, which POSTs a run or task control.
 - **`src/RunPage.tsx`: one run.** `runQuery` reads `GET /runs/{id}` with TanStack Query (the side
   list shares it for the active run's count); while the run is active, the page reloads it on
