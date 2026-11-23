@@ -6,19 +6,19 @@ with five, and you can add, remove or fully customize any of them.
 **Who it is for.** People who do not code: you ask for something in your own words, the
 lead agent plans it, you approve the plan, and the team of agents builds it. People who do code
 can still customize, fine-tune or edit anything (agents, plans, rights, checks) and feel at
-home. The app leads with the plain path and keeps every technical control one click away; a
-first-start survey (planned, M6 slice 7) lets each person choose whether those controls start
-open.
+home. The app leads with the plain path and keeps every technical control one click away; on
+first start a welcome screen lets each person choose whether those controls start open (the
+side list changes it later) and offers a short tour.
 
 **Status:** M1–M5 are implemented: a Python library (workers, worktrees, retries,
 pause/resume, saved runs with recovery, a lead agent that turns a request into a plan) and a
-local REST API with approvals and live events. The desktop app (M6) is in progress: it lists
+local REST API with approvals and live events. The desktop app (M6) is implemented: it lists
 runs and follows each one live, with its diffs to approve or reject and controls to pause,
 cancel, retry or recover work, and starts runs: ask for something in plain words, then approve
 the lead agent's plan with the rights each task gets, and edits your team of agents (the lead
 agent can propose a new one with a plan). Its frame and run screens follow the visual design
-(dark when Windows is dark); a design for the remaining screens and a first-start survey and guide
-are planned.
+(dark when Windows is dark). On first start a welcome screen explains the app, asks for the plain
+or technical view and offers a short tour. A design for the remaining screens is planned.
 
 ## What is AgentForge
 
@@ -319,6 +319,12 @@ Needs Node.js and Rust. Start the server (step 9) first, then:
 npm --prefix apps/desktop install
 npm --prefix apps/desktop run tauri dev
 ```
+
+The first time, a welcome screen explains how AgentForge works and asks how the app should look:
+**Plain** (technical options start folded under **More options**) or **Technical** (they start
+open). Then take the short tour, which points at each part of the window, or skip it. The app
+remembers your answers. **View** at the bottom of the side list changes the choice, and **Show
+the guide again** brings back the welcome screen and the tour.
 
 The window shows whether the server answers and lists every saved run. A run's page shows each
 task with its attempts, diffs and reasons, and follows the active run live. There you approve or

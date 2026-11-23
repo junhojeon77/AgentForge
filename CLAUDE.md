@@ -5,7 +5,7 @@ This file gives instructions to AI coding assistants working on this project.
 ## Project Overview
 
 AgentForge is a planned local-first Windows platform where one lead agent coordinates specialized
-coding agents: five by default, and users can add, remove or fully customize any of them. M1–M5 (including the lead agent and the local REST API) are implemented in `apps/api/src/agentforge`. M6 (the desktop app, `apps/desktop`) is in progress: slice 1 (API additions), slice 2 (the app shell: token, API client, live events, connection states) slice 3 (the run screens: list, run page, controls, diff review, plain styling) slice 4 (the proposal screens: ask for something, plans, approve with rights, reject) slice 5 (the agent editor, and new agents the lead proposes with a plan, made only on approval) and slice 6 (the visual design of the frame and the run screens, from `docs/design/agentforge`) are built. LangGraph and LangChain are used only for the lead agent and the Claude Code Runnable interface; keep scheduling, saved runs and recovery in plain code.
+coding agents: five by default, and users can add, remove or fully customize any of them. M1–M5 (including the lead agent and the local REST API) are implemented in `apps/api/src/agentforge`. M6 (the desktop app, `apps/desktop`) is implemented: slice 1 (API additions), slice 2 (the app shell: token, API client, live events, connection states) slice 3 (the run screens: list, run page, controls, diff review, plain styling) slice 4 (the proposal screens: ask for something, plans, approve with rights, reject) slice 5 (the agent editor, and new agents the lead proposes with a plan, made only on approval) slice 6 (the visual design of the frame and the run screens, from `docs/design/agentforge`) and slice 7 (the welcome screen, the plain or technical view and the tour) are built. LangGraph and LangChain are used only for the lead agent and the Claude Code Runnable interface; keep scheduling, saved runs and recovery in plain code.
 Everything else is planned. Keep AI reasoning separate from deterministic scheduling, validation,
 permissions and human approval.
 
@@ -26,7 +26,8 @@ Both must be served (see [GOVERNANCE.md](GOVERNANCE.md#who-agentforge-is-for)).
   dependencies unless asked.
 - Screens and messages use plain words first, keep ids visible, and put technical controls behind
   **More options** or a "for developers" section; never remove one. Whether they start open is
-  the user's choice (a first-start survey, M6 slice 7, planned).
+  the user's choice (the view on the welcome screen, `TechnicalView` in `ui.tsx`); a new
+  technical section must follow it.
 - Use subagents only when the user asks. Run one editor at a time; only read-only investigators
   may run in parallel.
 - Keep the user's unrelated changes. Add no speculative features, abstractions or dependencies.

@@ -7,9 +7,9 @@ decides what is in [GOVERNANCE.md](GOVERNANCE.md), and what is planned is in
 **Who it is for.** People who do not code: you ask for something in your own words, the
 lead agent plans it, you approve the plan, and the team of agents builds it. People who do code
 can still customize, fine-tune or edit anything (agents, plans, rights, checks) and feel at
-home. The app leads with the plain path and keeps every technical control one click away; a
-first-start survey (planned, M6 slice 7) lets each person choose whether those controls start
-open.
+home. The app leads with the plain path and keeps every technical control one click away; on
+first start a welcome screen lets each person choose whether those controls start open (the
+side list changes it later) and offers a short tour.
 
 When you write a screen or a message: plain words first (say "May change files", not
 `allowed_operations`), ids still visible, and technical controls behind **More options** or a
@@ -322,8 +322,8 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   confirm, ghost; busy shows the static arc), `StatusBadge`, `NeedsCount`, `Alert`,
   `CopyButton` and `copyText` (a failure logged by name, never the text), `Confirm` (asks first,
   in place, focus on the safe answer), `ReasonForm` (a required reason), `problem` (an error in
-  words), `MoreOptions` (technical fields, folded), `Field` (a labelled field with a hint),
-  `BUTTON` and `FIELD`.
+  words), `TechnicalView` (true in the technical view), `MoreOptions` (technical fields, open
+  only in the technical view), `Field` (a labelled field with a hint), `BUTTON` and `FIELD`.
 - **`src/index.css` and `src/Icon.tsx`: the design.** The Tailwind v4 theme from
   [docs/design/agentforge](docs/design/agentforge/README.md): only its colours exist (Tailwind's
   default palette is removed, and an unknown class is silently ignored, so use the design's
@@ -335,7 +335,7 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   `planRequest`, `proposePlan`, `approveProposal`, `rejectProposal`.
 - **`src/ProposalPage.tsx`: plans.** `NewProposal` (Ask for something, and the JSON editor for
   developers) and `ProposalPage` (one plan, its new agents, its approve-with-rights form and
-  reject). Technical fields sit in `MoreOptions`, folded.
+  reject). Technical fields sit in `MoreOptions`; the JSON editor follows `TechnicalView` too.
 - **`src/agents.ts`: the team's rules.** `Agent`, `REASONING`, `PERSONA_LIMIT`, `toId(name)`,
   `agentPath`, `saveAgent` (PUT) and `removeAgent` (DELETE).
 - **`src/AgentsPage.tsx`: Your team.** The list, the inline editor and remove; `AgentFields`
@@ -344,13 +344,22 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
 - **`src/App.tsx`**: the status bar, the "can't reach its server" screen, the side list (Ask for
   something, Your team, and the Runs and Plans tabs with their counts of what waits for you; the
   plans and the active run's report polled with `GET /runs`) and the selected page; with no run
-  yet it opens Ask for something.
+  yet it opens Ask for something. It shows the welcome screen until it is passed, the tour
+  while one is wanted and the app is connected, and marks the tour's targets with `data-tour`.
+- **`src/guide.ts`: the guide's saved choices.** `Guide` (the view, whether the welcome was
+  passed, the tour wanted, done or skipped), `loadGuide` and `saveGuide` (the window's
+  `localStorage`, passed in; a bad or unreadable value falls back to the start and is logged
+  by reason, never by its text), and `finishWelcome`, `endTour`, `setView` and `showAgain`.
+- **`src/GuideScreens.tsx`: the guide on screen.** `Welcome`, `Tour` (a modal `<dialog>` per
+  step, placed beside its target by CSS anchor positioning in `index.css`) and `ViewFooter`
+  (the side list's **View** switch and **Show the guide again**).
 - **`src/log.ts`**: console lines prefixed `agentforge.desktop:`. Ids, statuses, paths and
   reasons only, never the token or response text.
 
 Its tests sit next to the code (`*.test.ts`) and use a fake `fetch`, a fake token reader and
 an injected `wait`, with no timers: `client.test.ts`, `events.test.ts`, `connection.test.ts`,
-`runs.test.ts`, `proposals.test.ts`, `agents.test.ts` and `ui.test.ts`. The components have no tests of their own; `tsc` checks them.
+`runs.test.ts`, `proposals.test.ts`, `agents.test.ts`, `ui.test.ts` and `guide.test.ts` (a
+fake storage). The components have no tests of their own; `tsc` checks them.
 
 Delivered contracts and limits are in [M1-domain.md](docs/milestones/M1-domain.md),
 [M2-claude-code.md](docs/milestones/M2-claude-code.md),

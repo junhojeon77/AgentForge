@@ -10,9 +10,9 @@ released, and what goes on the [roadmap](ROADMAP.md).
 **Who it is for.** People who do not code: you ask for something in your own words, the
 lead agent plans it, you approve the plan, and the team of agents builds it. People who do code
 can still customize, fine-tune or edit anything (agents, plans, rights, checks) and feel at
-home. The app leads with the plain path and keeps every technical control one click away; a
-first-start survey (planned, M6 slice 7) lets each person choose whether those controls start
-open.
+home. The app leads with the plain path and keeps every technical control one click away; on
+first start a welcome screen lets each person choose whether those controls start open (the
+side list changes it later) and offers a short tour.
 
 Changes are weighed against both: a screen or message must make sense to someone who does not
 code, and must not take away a control someone who does code relies on.

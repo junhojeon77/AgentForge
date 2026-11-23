@@ -1,7 +1,7 @@
-# M6 — Desktop dashboard (in progress)
+# M6 — Desktop dashboard
 
 M6 gives AgentForge a window: a Tauri 2 desktop app to follow runs live, approve plans and
-diffs, control tasks and edit agents on screen. It is built in slices.
+diffs, control tasks and edit agents on screen. It was built in seven slices and is implemented within the limits below.
 
 The app is for people who do not code as well as those who do ([who it is
 for](../../README.md)): every screen leads with the plain path in plain words and keeps each
@@ -15,12 +15,57 @@ technical control one click away, under **More options** or a "for developers" s
 | 4 | Proposals: list, detail, new from a request or by hand, approve with rights | Implemented on 2026-11-20, with plain styling |
 | 5 | Agent editor ("Your team"), and new agents the lead agent proposes with a plan | Implemented on 2026-11-20, with plain styling |
 | 6 | Visual design of the frame and the run screens, from a Claude Design pass | Implemented on 2026-11-21; Ask for something, plans and Your team wait for their own design |
-| 7 | First-start survey and guide: choose the plain or technical view (whether **More options** starts open), changeable later | Planned |
+| 7 | Welcome screen, the plain or technical view (whether **More options** starts open) and a tour, changeable later | Implemented on 2026-11-22, with plain styling |
 
 Slice 1 is the API side, slice 2 the app's shell, slice 3 the run screens, slice 4 the proposal
-screens, slice 5 the agent editor and slice 6 the visual design of the frame and the run screens.
-Ask for something, the plan page and Your team keep their plain layout until their own design
-pass; they already use the theme's colours and the restyled buttons and fields.
+screens, slice 5 the agent editor, slice 6 the visual design of the frame and the run screens and
+slice 7 the welcome screen, the view choice and the tour. Ask for something, the plan page, Your
+team, the welcome screen and the tour keep their plain layout until their own design pass; they
+already use the theme's colours and the restyled buttons and fields.
+
+## Delivered behavior (slice 7)
+
+**The welcome screen.** The first time the app opens, before anything else and even while the
+server is off, it says what AgentForge does and how it works in four steps (ask, approve the
+plan, the team builds, review each change). It then asks "How should the app look?":
+
+- **Plain**: technical options start folded under **More options**. This is the default.
+- **Technical**: they start open.
+
+The view covers every **More options** section and **Write the plan yourself (for developers)**.
+A run's attempts, its diffs and "What the lead agent fixed along the way" are content, not
+technical controls, so they open as before. Switching the view opens or folds every section on
+screen at once; you can still open or fold one by hand.
+
+**The tour.** The welcome screen ends with **Take the tour** or **Skip the tour**. The tour is
+six cards, one at a time ("Step 2 of 6"):
+
+1. **Ask for something**
+2. **Plans**
+3. **Runs**
+4. **Your team**
+5. The status bar
+6. The **View** switch
+
+Each card sits beside the part it explains, which gets an accent ring. It is a modal dialog, so
+the rest of the window waits until the tour ends. **Back** and **Next** move between cards, and
+**Finish** on the last card ends the tour. **End tour** or Escape stops it early, and the focus
+stays on **Next**. The cards point at the side list, which exists only while the app is
+connected, so a tour chosen while the server is off starts once the app connects. If the
+connection drops mid-tour, the tour starts again from step 1 after the reconnect.
+
+**Saved, and changeable later.** The app keeps three things in the window's own storage
+(`localStorage`, key `agentforge.guide`), with no server change:
+
+- the view
+- that the welcome screen was passed
+- the tour's state: wanted, done or skipped
+
+Neither the welcome nor a finished or skipped tour comes back on its own. A tour that was chosen
+but not finished comes back after a restart. At the bottom of the side list, **View: Plain /
+Technical** changes the view, and **Show the guide again** brings back the welcome screen
+(keeping the view) and with it the offer of the tour. If the storage cannot be read or holds
+something unexpected, the app starts as on a first start: plain view, welcome screen shown.
 
 ## Delivered behavior (slice 6)
 
@@ -249,7 +294,7 @@ one default in a new profile keeps the other four.
 | `agentforge.api` | DEBUG | `api: run <id> starts with agents <ids>` |
 | `agentforge.api` | DEBUG | A refused agent request or a broken persona file: the existing `<method> <path> answered <status>`; the detail, which can quote the file, is never logged |
 
-### The desktop app (slices 2 to 6)
+### The desktop app (slices 2 to 7)
 
 | Question | Where the answer is |
 |---|---|
@@ -272,6 +317,9 @@ one default in a new profile keeps the other four.
 | Why did the lead agent add an agent, or why was its agent refused? | The plan's page: its new agents, and under "What the lead agent fixed along the way" each rule its agents broke (the check's issues) |
 | Why was a plan with new agents not approved? | The `detail` under the form: `keep the proposed agents: …` (400) or `agent … already exists` (409, made in the meantime) |
 | Where did my plan's reject reason go? | On the plan's page (`Proposal.reason`). It is never logged |
+| Why does the welcome screen show again? | The saved choices could not be read: the console has `guide: could not read the saved choices: <reason>` (`bad shape`, `no storage` or the error's name). Or someone pressed **Show the guide again** (`guide: shown again`) |
+| Why does the tour start when I open the app? | It was chosen but not finished (`tour=wanted` in the `guide: welcome passed` line); finish it or press **End tour** |
+| How do I see a first start again? | **Show the guide again**, or clear the window's local storage (right-click, Inspect, Application, Local storage) and reload |
 | What did the app do, in order? | The webview's developer console (right-click, Inspect, in `tauri dev`): lines starting `agentforge.desktop:` |
 
 | Console level | Line |
@@ -285,10 +333,13 @@ one default in a new profile keeps the other four.
 | debug | `events for run <id> dropped after <sequence>; reconnecting` / `events for run <id> ended after <sequence>` |
 | warn | `events for run <id> stopped: <status or kind>` |
 | warn | `copy <what> failed: <error name>`: never the copied text, since a diff can hold secrets |
+| debug | `guide: welcome passed, view=<view>, tour=<wanted or skipped>` / `guide: tour step <n> of 6 (<part>)` / `guide: tour <done or skipped>` / `guide: view=<view>` / `guide: shown again` |
+| warn | `guide: could not read the saved choices: <reason>` / `guide: could not save the choices: <reason>`: `bad shape`, `no storage` or the error's name, never the saved text |
 
 The token, request and response bodies (a reject reason, a request's text, a plan among them),
 field errors, the lead agent's rounds, diffs, worker reports and transition details are never
-logged.
+logged. The welcome screen, view and tour happen in the app alone, with no run, so they have no
+run report; the console lines above are their record.
 
 ## Limits
 
@@ -317,9 +368,13 @@ logged.
   agents folder yourself.
 - **A new agent the lead proposes cannot be dropped at approval, nor its role changed;** change
   how it works, or reject the plan and ask again.
-- **Every technical control starts folded** until slice 7's survey lets each person choose.
-- **Ask for something, the plan page and Your team keep their plain layout** until their own
-  design pass; only their colours and shared buttons and fields follow the design.
+- **The view, the welcome and the tour are saved in this window only.** `tauri dev` and an
+  installed build (M8) use different storage, so a choice made in one does not carry to the
+  other. Clearing the WebView2 data starts over.
+- **The tour points at the side list and the status bar only;** it does not open pages or show
+  what a run looks like.
+- **Ask for something, the plan page, Your team, the welcome screen and the tour keep their
+  plain layout** until their own design pass; only their colours and shared buttons and fields follow the design.
 - **The active run's report is read every 2 seconds** for the waiting-diffs count, on top of the
   reloads its live events cause.
 - **The theme follows Windows;** there is no light or dark switch in the app.
@@ -332,14 +387,25 @@ logged.
 
 | Deferred | Waits for |
 |---|---|
-| A visual design for Ask for something, the plan page and Your team | Their own Claude Design pass |
-| A first-start survey and guide (plain or technical view) | Slice 7 |
+| A visual design for Ask for something, the plan page, Your team, the welcome screen and the tour | Their own Claude Design pass |
 | A command-line option for allowed origins | When a second client needs it |
 
 ## Acceptance checks
 
 Run the pytest and Ruff commands in the root README, plus `npm --prefix apps/desktop test` and
-`npm --prefix apps/desktop run build`. Slice 6's tests:
+`npm --prefix apps/desktop run build`. Slice 7's tests:
+
+- `guide.test.ts`: the start (plain view, welcome shown) when nothing is saved; saved choices
+  read back; text that is not JSON, an unknown view or tour state, a welcome flag that is not
+  true or false, a value that is not an object, a storage that refuses and no storage at all,
+  each falling back to the start with its reason logged and the saved text kept out of the log;
+  a save written as JSON under `agentforge.guide`, and a refused or missing storage warned about
+  without throwing; passing the welcome with the tour wanted or skipped, ending the tour done or
+  skipped, switching the view, and showing the guide again with the view kept, each with its
+  console line.
+
+The welcome screen, the tour and the footer have no tests of their own (that would need a DOM
+library); `tsc` and the window check cover them. Slice 6's tests:
 
 - `runs.test.ts`: every diff line's tone by where it is (outside a hunk a file header, `new
   file mode` included; inside one a removed `--- note` and an added `+++ x` stay changes); the
