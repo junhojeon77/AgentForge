@@ -397,10 +397,11 @@ Run the pytest and Ruff commands in the root README, plus `npm --prefix apps/des
 
 - `guide.test.ts`: the start (plain view, welcome shown) when nothing is saved; saved choices
   read back; text that is not JSON, an unknown view or tour state, a welcome flag that is not
-  true or false, a value that is not an object, a storage that refuses and no storage at all,
-  each falling back to the start with its reason logged and the saved text kept out of the log;
-  a save written as JSON under `agentforge.guide`, and a refused or missing storage warned about
-  without throwing; passing the welcome with the tour wanted or skipped, ending the tour done or
+  true or false, a value that is not an object, a storage that refuses, a storage that cannot
+  even be reached (reading `localStorage` throws) and no storage at all, each falling back to the
+  start with its reason logged and the saved text kept out of the log; a save written as JSON
+  under `agentforge.guide`, and a refused, unreachable or missing storage warned about without
+  throwing; passing the welcome with the tour wanted or skipped, ending the tour done or
   skipped, switching the view, and showing the guide again with the view kept, each with its
   console line.
 
