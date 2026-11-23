@@ -174,3 +174,24 @@
     *, *::before, *::after { animation: none !important; transition: none !important; }
   }
 }
+
+/* The tour (GuideScreens.tsx): the part a step explains gets an accent ring, unlike the focus
+   ring, and the card sits beside it by CSS anchor positioning (WebView2 is Chromium), flipping to
+   the other side when there is no room. The ring is drawn inside, so the window's edge (the
+   status bar's top) cannot cut it off. */
+[data-tour-current] {
+  anchor-name: --tour-target;
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.tour-card {
+  position-anchor: --tour-target;
+  inset: auto;
+  margin: 8px;
+  position-try-fallbacks: flip-block, flip-inline;
+}
+.tour-card[data-place="right"] { position-area: right span-bottom; }
+.tour-card[data-place="right-up"] { position-area: right span-top; }
+.tour-card[data-place="below"] { position-area: bottom; }
+/* Transparent, so the part being explained stays in plain sight. */
+.tour-card::backdrop { background: transparent; }

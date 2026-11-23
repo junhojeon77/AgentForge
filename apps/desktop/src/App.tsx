@@ -4,11 +4,29 @@ import { AgentsPage } from "./AgentsPage";
 import { API_BASE, createClient } from "./api/client";
 import { readToken } from "./api/token";
 import { type ConnectionState, POLL_MS, useConnection } from "./connection";
+import { Tour, ViewFooter, Welcome } from "./GuideScreens";
+import {
+  endTour,
+  finishWelcome,
+  type Guide,
+  loadGuide,
+  saveGuide,
+  setView,
+  showAgain,
+} from "./guide";
 import { Icon, type IconName } from "./Icon";
 import { NewProposal, ProposalPage, STATUS } from "./ProposalPage";
 import type { Proposal } from "./proposals";
 import { RunPage, runQuery } from "./RunPage";
-import { type BadgeGroup, Button, CopyButton, NeedsCount, problem, StatusBadge } from "./ui";
+import {
+  type BadgeGroup,
+  Button,
+  CopyButton,
+  NeedsCount,
+  problem,
+  StatusBadge,
+  TechnicalView,
+} from "./ui";
 
 type View = { kind: "run" | "proposal"; id: string } | { kind: "new" | "agents" };
 type Tab = "runs" | "plans";
@@ -69,6 +87,11 @@ export function App() {
   const [folder, setFolder] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
   const [tab, setTab] = useState<Tab>("runs");
+  const [guide, setGuide] = useState(() => loadGuide(globalThis.localStorage));
+  const keep = (next: Guide) => {
+    setGuide(next);
+    saveGuide(globalThis.localStorage, next);
+  };
   const list = useRef<HTMLDivElement>(null);
   const scrolls = useRef<Record<Tab, number>>({ runs: 0, plans: 0 });
   const shown = STATES[state];
@@ -134,9 +157,22 @@ export function App() {
     },
   ];
 
-  return (
+  // The welcome needs no server, so it comes first even while the server is off.
+  if (!guide.welcomed) {
+    return (
+      <div className="flex h-screen flex-col bg-canvas text-ink">
+        <Welcome
+          view={guide.view}
+          onDone={(view, takeTour) => keep(finishWelcome(view, takeTour))}
+        />
+      </div>
+    );
+  }
+
+  const frame = (
     <div className="flex h-screen flex-col bg-canvas text-ink">
       <header
+        data-tour="status"
         className={`flex h-9 shrink-0 items-center justify-between gap-3 border-b px-3 ${shown.bar}`}
       >
         <p
@@ -167,13 +203,18 @@ export function App() {
             <div className="space-y-1 p-2">
               <Button
                 kind="primary"
+                data-tour="ask"
                 className="w-full justify-center"
                 aria-current={isOpen("new") ? "page" : undefined}
                 onClick={() => show({ kind: "new" })}
               >
                 Ask for something
               </Button>
-              <SideItem current={isOpen("agents")} onClick={() => show({ kind: "agents" })}>
+              <SideItem
+                current={isOpen("agents")}
+                tour="team"
+                onClick={() => show({ kind: "agents" })}
+              >
                 Your team
               </SideItem>
             </div>
@@ -195,6 +236,7 @@ export function App() {
                   id={`tab-${t.id}`}
                   type="button"
                   role="tab"
+                  data-tour={t.id}
                   aria-selected={tab === t.id}
                   aria-controls="side-list"
                   tabIndex={tab === t.id ? 0 : -1}
@@ -270,6 +312,11 @@ export function App() {
                 </>
               )}
             </div>
+            <ViewFooter
+              view={guide.view}
+              onView={(view) => keep(setView(guide, view))}
+              onShowAgain={() => keep(showAgain(guide))}
+            />
           </nav>
           <main className="min-w-0 flex-1 overflow-y-auto p-6">
             <div className="max-w-280">
@@ -307,8 +354,13 @@ export function App() {
           </main>
         </div>
       )}
+      {/* A tour chosen while the server is off starts once the frame it points at is there. */}
+      {connected && guide.tour === "wanted" && (
+        <Tour onEnd={(finished) => keep(endTour(guide, finished))} />
+      )}
     </div>
   );
+  return <TechnicalView value={guide.view === "technical"}>{frame}</TechnicalView>;
 }
 
 /** What fills the window while the server cannot be reached; the status bar says which case. */
@@ -361,11 +413,14 @@ function SideId({ children }: { children: ReactNode }) {
 function SideItem({
   current,
   title,
+  tour,
   onClick,
   children,
 }: {
   current: boolean;
   title?: string;
+  /** Marks the item for a tour step (GuideScreens.tsx). */
+  tour?: string;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -373,6 +428,7 @@ function SideItem({
     <button
       type="button"
       title={title}
+      data-tour={tour}
       aria-current={current ? "page" : undefined}
       onClick={onClick}
       className={`relative flex min-h-9 w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2 py-1.5 text-left text-[13px] ${

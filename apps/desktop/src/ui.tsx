@@ -1,5 +1,12 @@
 // The pieces every screen shares, styled from the design (docs/design/agentforge).
-import { type ButtonHTMLAttributes, type ReactNode, useId, useState } from "react";
+import {
+  type ComponentProps,
+  createContext,
+  type ReactNode,
+  useContext,
+  useId,
+  useState,
+} from "react";
 import { ApiError } from "./api/client";
 import { Icon, type IconName } from "./Icon";
 import { log } from "./log";
@@ -43,7 +50,7 @@ export function Button({
   className = "",
   children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
+}: ComponentProps<"button"> & {
   kind?: Kind;
   small?: boolean;
   busy?: boolean;
@@ -336,11 +343,15 @@ export function ReasonForm({
   );
 }
 
-// Technical controls stay one click away; slice 7's first-start survey will choose whether
-// these start open.
+/** True in the technical view: every technical section starts open. */
+export const TechnicalView = createContext(false);
+
+// Technical controls stay one click away; the view chosen on the welcome screen decides
+// whether they start open.
 export function MoreOptions({ children }: { children: ReactNode }) {
+  const technical = useContext(TechnicalView);
   return (
-    <details className="text-sm">
+    <details open={technical} className="text-sm">
       <summary className="cursor-pointer">More options</summary>
       <div className="mt-2 space-y-2 border-l-2 border-line pl-3">{children}</div>
     </details>

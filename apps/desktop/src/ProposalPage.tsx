@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { AgentFields } from "./AgentsPage";
 import type { Agent } from "./agents";
 import type { Client } from "./api/client";
@@ -17,7 +17,16 @@ import {
   rejectProposal,
   roundsOf,
 } from "./proposals";
-import { BUTTON, Confirm, FIELD, Field, MoreOptions, problem, ReasonForm } from "./ui";
+import {
+  BUTTON,
+  Confirm,
+  FIELD,
+  Field,
+  MoreOptions,
+  problem,
+  ReasonForm,
+  TechnicalView,
+} from "./ui";
 
 export const STATUS = {
   pending: "Waiting for your OK",
@@ -403,6 +412,7 @@ export function NewProposal({
   const template = planTemplate(agents.data?.agents.map((a) => a.role) ?? [], runId.trim());
   const text = plan ?? template;
   const busy = ask.isPending || byHand.isPending;
+  const technical = useContext(TechnicalView);
 
   return (
     <section aria-labelledby="new-title" className="max-w-3xl space-y-4">
@@ -478,7 +488,7 @@ export function NewProposal({
         </div>
       )}
 
-      <details className="text-sm">
+      <details open={technical} className="text-sm">
         <summary className="cursor-pointer">Write the plan yourself (for developers)</summary>
         <form
           className="mt-2 space-y-2"
