@@ -34,14 +34,21 @@ function memory(saved: Record<string, string> = {}) {
   };
 }
 
+const refused = () => new DOMException(`Access denied: ${SECRET}`, "SecurityError");
+
+// Like a browser with site data blocked: even reading `localStorage` throws.
+const unreachable = () => {
+  throw refused();
+};
+
 function broken() {
-  const refused = new DOMException(`Access denied: ${SECRET}`, "SecurityError");
+  const error = refused();
   return {
     getItem: vi.fn((_key: string): string | null => {
-      throw refused;
+      throw error;
     }),
     setItem: vi.fn((_key: string, _value: string) => {
-      throw refused;
+      throw error;
     }),
   };
 }
@@ -54,7 +61,7 @@ beforeEach(() => {
 
 describe("loadGuide", () => {
   it("starts with the plain view and the welcome screen when nothing is saved", () => {
-    expect(loadGuide(memory())).toEqual({ view: "plain", welcomed: false, tour: null });
+    expect(loadGuide(() => memory())).toEqual({ view: "plain", welcomed: false, tour: null });
     expect(DEFAULT_GUIDE).toEqual({ view: "plain", welcomed: false, tour: null });
     expect(warned()).toBe("");
   });
@@ -63,7 +70,7 @@ describe("loadGuide", () => {
     const saved: Guide = { view: "technical", welcomed: true, tour: "done" };
     const storage = memory({ [GUIDE_KEY]: JSON.stringify(saved) });
 
-    expect(loadGuide(storage)).toEqual(saved);
+    expect(loadGuide(() => storage)).toEqual(saved);
     expect(storage.getItem).toHaveBeenCalledWith("agentforge.guide");
   });
 
@@ -75,20 +82,26 @@ describe("loadGuide", () => {
     ["a value that is not an object", JSON.stringify(SECRET), "bad shape"],
     ["null", "null", "bad shape"],
   ])("falls back to the start for %s, logging why but never the saved text", (_, text, why) => {
-    expect(loadGuide(memory({ [GUIDE_KEY]: text }))).toEqual(DEFAULT_GUIDE);
+    expect(loadGuide(() => memory({ [GUIDE_KEY]: text }))).toEqual(DEFAULT_GUIDE);
     expect(warned()).toContain(`guide: could not read the saved choices: ${why}`);
     expect(logged()).not.toContain(SECRET);
   });
 
   it("falls back to the start when the storage refuses, logging the error's name only", () => {
-    expect(loadGuide(broken())).toEqual(DEFAULT_GUIDE);
+    expect(loadGuide(() => broken())).toEqual(DEFAULT_GUIDE);
     expect(warned()).toContain("guide: could not read the saved choices: SecurityError");
     expect(logged()).not.toContain(SECRET);
   });
 
   it("falls back to the start when the window has no storage", () => {
-    expect(loadGuide(undefined)).toEqual(DEFAULT_GUIDE);
+    expect(loadGuide(() => undefined)).toEqual(DEFAULT_GUIDE);
     expect(warned()).toContain("guide: could not read the saved choices: no storage");
+  });
+
+  it("falls back to the start when the storage cannot even be reached", () => {
+    expect(loadGuide(unreachable)).toEqual(DEFAULT_GUIDE);
+    expect(warned()).toContain("guide: could not read the saved choices: SecurityError");
+    expect(logged()).not.toContain(SECRET);
   });
 });
 
@@ -97,21 +110,27 @@ describe("saveGuide", () => {
     const storage = memory();
     const guide: Guide = { view: "technical", welcomed: true, tour: "wanted" };
 
-    saveGuide(storage, guide);
+    saveGuide(() => storage, guide);
 
     expect(storage.setItem).toHaveBeenCalledWith("agentforge.guide", JSON.stringify(guide));
-    expect(loadGuide(storage)).toEqual(guide);
+    expect(loadGuide(() => storage)).toEqual(guide);
   });
 
   it("warns by name and carries on when the storage refuses", () => {
-    expect(() => saveGuide(broken(), DEFAULT_GUIDE)).not.toThrow();
+    expect(() => saveGuide(() => broken(), DEFAULT_GUIDE)).not.toThrow();
     expect(warned()).toContain("guide: could not save the choices: SecurityError");
     expect(logged()).not.toContain(SECRET);
   });
 
   it("warns and carries on when the window has no storage", () => {
-    expect(() => saveGuide(undefined, DEFAULT_GUIDE)).not.toThrow();
+    expect(() => saveGuide(() => undefined, DEFAULT_GUIDE)).not.toThrow();
     expect(warned()).toContain("guide: could not save the choices: no storage");
+  });
+
+  it("warns by name and carries on when the storage cannot even be reached", () => {
+    expect(() => saveGuide(unreachable, DEFAULT_GUIDE)).not.toThrow();
+    expect(warned()).toContain("guide: could not save the choices: SecurityError");
+    expect(logged()).not.toContain(SECRET);
   });
 });
 

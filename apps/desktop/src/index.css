@@ -188,7 +188,8 @@
   position-anchor: --tour-target;
   inset: auto;
   margin: 8px;
-  position-try-fallbacks: flip-block, flip-inline;
+  /* Last resort for a narrow window: under the target, running to the right edge. */
+  position-try-fallbacks: flip-block, flip-inline, bottom span-right;
 }
 .tour-card[data-place="right"] { position-area: right span-bottom; }
 .tour-card[data-place="right-up"] { position-area: right span-top; }

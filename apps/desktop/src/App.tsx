@@ -87,10 +87,10 @@ export function App() {
   const [folder, setFolder] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
   const [tab, setTab] = useState<Tab>("runs");
-  const [guide, setGuide] = useState(() => loadGuide(globalThis.localStorage));
+  const [guide, setGuide] = useState(() => loadGuide(() => globalThis.localStorage));
   const keep = (next: Guide) => {
     setGuide(next);
-    saveGuide(globalThis.localStorage, next);
+    saveGuide(() => globalThis.localStorage, next);
   };
   const list = useRef<HTMLDivElement>(null);
   const scrolls = useRef<Record<Tab, number>>({ runs: 0, plans: 0 });

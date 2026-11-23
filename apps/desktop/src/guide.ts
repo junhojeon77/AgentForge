@@ -21,13 +21,17 @@ function isGuide(value: unknown): value is Guide {
 // The saved text and an error's message can quote what was stored, so only the name is logged.
 const why = (error: unknown) => (error instanceof Error ? error.name : "unknown error");
 
+// A getter, since merely reading `localStorage` throws when site data is blocked.
+type GetStorage = () => GuideStorage | undefined;
+
 /** The saved choices, or the start (plain view, welcome shown) if they cannot be read. */
-export function loadGuide(storage: GuideStorage | undefined): Guide {
-  if (!storage) {
-    log.warn("guide: could not read the saved choices: no storage");
-    return DEFAULT_GUIDE;
-  }
+export function loadGuide(getStorage: GetStorage): Guide {
   try {
+    const storage = getStorage();
+    if (!storage) {
+      log.warn("guide: could not read the saved choices: no storage");
+      return DEFAULT_GUIDE;
+    }
     const text = storage.getItem(GUIDE_KEY);
     if (text === null) return DEFAULT_GUIDE;
     const saved: unknown = JSON.parse(text);
@@ -39,12 +43,13 @@ export function loadGuide(storage: GuideStorage | undefined): Guide {
   return DEFAULT_GUIDE;
 }
 
-export function saveGuide(storage: GuideStorage | undefined, guide: Guide): void {
-  if (!storage) {
-    log.warn("guide: could not save the choices: no storage");
-    return;
-  }
+export function saveGuide(getStorage: GetStorage, guide: Guide): void {
   try {
+    const storage = getStorage();
+    if (!storage) {
+      log.warn("guide: could not save the choices: no storage");
+      return;
+    }
     storage.setItem(GUIDE_KEY, JSON.stringify(guide));
   } catch (error) {
     log.warn(`guide: could not save the choices: ${why(error)}`);
