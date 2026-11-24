@@ -1,6 +1,6 @@
 AgentForge is a local Windows desktop app for supervising AI coding agents. A person watches runs that last minutes to hours, reads agents' diffs, and approves, rejects, pauses, cancels, retries or recovers work. The interface is a calm, dense instrument panel: quiet neutrals everywhere, and colour spent only where a person needs to act.
 
-**Who it is for.** People who do not code: they ask for something in their own words, the lead agent plans it, they approve the plan, and the team of agents builds it. People who do code can still customize, fine-tune or edit anything and feel at home. Lead every screen with the plain path in plain words ("May change files", not `allowed_operations`) and keep each technical control one click away under **More options** or a "for developers" section, never removed. On first start a welcome screen (M6 slice 7) lets each person choose whether those sections start open, and the **View** switch at the bottom of the side list changes it later. The welcome screen and its tour have no design of their own yet.
+**Who it is for.** People who do not code: they ask for something in their own words, the lead agent plans it, they approve the plan, and the team of agents builds it. People who do code can still customize, fine-tune or edit anything and feel at home. Lead every screen with the plain path in plain words ("May change files", not `allowed_operations`) and keep each technical control one click away under **More options** or a "for developers" section, never removed. A first-start survey and guide (M6 slice 7) lets each person choose whether those sections start open.
 
 ## Principles
 
@@ -84,7 +84,8 @@ File headers are the lines from `diff --git` to the first `@@` of each file; ins
 
 System fonts only (the window blocks web fonts): `sans` is Segoe UI Variable Text, `display` is Segoe UI Variable Display, `mono` is Cascadia Mono, falling back to Consolas.
 
-- `page-title` (20/28 semibold, display): the run id in the page header. Wraps with `overflow-wrap: anywhere`.
+- `welcome-title` (28/36 semibold, display): "Welcome to AgentForge" only. Added in the second pass: the welcome screen has no side list or status bar, and 20px is lost in an empty 1000×700 window.
+- `page-title` (20/28 semibold, display): the run id in the page header; "Ask for something", "Plan `<id>`" and "Your team". Wraps with `overflow-wrap: anywhere`.
 - `section-title` (15/20 semibold): "Tasks", "History", task card titles.
 - `body` (14/20): default text.
 - `control` (13/16 semibold): buttons, tabs, sidebar items.
@@ -100,21 +101,54 @@ Use tabular numerals (`font-variant-numeric: tabular-nums`) for history numbers 
 ```
 ┌ status bar · statusbar-h 36 · panel ·························· [Reconnect] ┐
 ├ sidebar · sidebar-w 248 · panel ┬ main · canvas · padding space-6 ─────────┤
-│ [Runs] [Proposals] [Agents]     │ Page header: run id · state · run controls│
-│ Runs · 132                      │ (notice: live updates stopped)           │
-│ ▌run-2026-11-20-login  Active   │ Tasks · cards, gap space-4               │
-│  run-2026-11-19-schema  Interr. │ History · table in a scroll box          │
+│ [ Ask for something ]           │ Page header: run id · state · run controls│
+│  Your team                      │ (notice: live updates stopped)           │
+│ [Runs] [Plans 1]                │ Tasks · cards, gap space-4               │
+│ ▌run-2026-11-20-login  Active   │ History · table in a scroll box          │
 │  …scrolls                       │                                           │
+│ View ◉ Plain ○ Technical        │                                           │
+│ Show the guide again            │                                           │
 └─────────────────────────────────┴───────────────────────────────────────────┘
 ```
 
 - The status bar is always visible; only the area under it changes.
-- The sidebar has a tab row at the top for its sections. Since slice 5 it shows the **Ask for something** and **Your team** buttons, then the "Runs" and "Plans" lists (proposals are called plans on screen, agents "Your team"); whether these become tabs is for the design pass to decide. The run list scrolls on its own.
+- The sidebar, top to bottom: **Ask for something** (its one filled button) and **Your team** (a side item); a tab row, **Runs** and **Plans** (proposals are called plans on screen), with the count of plans waiting for your OK on the Plans tab; the chosen list, which scrolls on its own; and the ViewFooter (View: Plain or Technical, and "Show the guide again"), pinned to the bottom. Decided in the second pass: Ask for something and Your team stay above the tabs because they are places, not lists.
 - The main page scrolls on its own. Its content stops at `content-max-w` on wide windows.
 - Below 900px window width the sidebar narrows to `sidebar-w-narrow` and the page header's controls wrap under the title. At 800px everything still fits without horizontal scrolling of the page (only the diff box scrolls sideways).
 - Spacing uses the 4px steps: `space-2` between buttons, `space-4` inside and between cards, `space-6` around the page and between sections.
 - Radius: `radius-sm` for inline code and tiles, `radius-md` for controls and boxes, `radius-lg` for cards, `radius-full` for badges and dots only. Never one radius on everything.
+- Forms and prose (Ask for something, Your team's lede, the plan's decision text) stop at `form-max-w` (720px), so lines stay readable; task cards, the rights table and the team grid use the full content width.
 - Nesting: one level of box at most inside a card (a diff or long-text box). The review band and attempts are full-width rows of the card, not boxes inside it.
+
+## Plain and Technical views
+
+People who don't code come first; people who do keep every control. Every screen leads with the plain path in plain words, and technical controls sit one click away, never removed:
+
+- **MoreOptions** holds technical fields inside a form (run name, revisions, attempts, time limits, model, reasoning). The person's **View** decides how it starts: Plain starts folded, Technical starts open. A hand toggle lasts until the screen is left and never changes the View. A field error inside it opens it.
+- **ForDevelopers** holds work only developers do (writing a plan as JSON). It starts folded in both views, because a large editor open by default would push the plain path's result off screen.
+- "What the lead agent fixed along the way" also starts folded in both views: it is history, not a setting.
+- The View is chosen on the Welcome screen and changed in the ViewFooter. Nothing else depends on it: switching views only opens or folds MoreOptions, so every control stays where it was.
+- Ids (run, plan, task, agent) stay visible in `mono` in both views.
+
+## Screens
+
+| Screen | Components | Guide |
+|---|---|---|
+| Run page | PageHeader, TaskCard, Attempt, DiffView, LongText, ReviewBox, InlineConfirm, Feedback, HistoryTable | RunScreen |
+| Ask for something | AskForm, MoreOptions, ForDevelopers | AskScreen |
+| A plan's page | PlanPage, TaskRights, AgentEditor (for proposed agents), MoreOptions | PlanScreen, ApproveScreen |
+| Your team | AgentCard, AgentEditor, MoreOptions | TeamScreen |
+| Welcome (first start, and "Show the guide again") | Welcome | WelcomeScreen |
+| The tour | TourCard, ViewFooter | TourScreen |
+| Not connected | EmptyState | EmptyState |
+
+Rules the second pass adds:
+
+- **One primary per section.** Ask for something: Plan it. A plan: Approve and start. Your team: Add an agent (the open editor's Save is its own section's primary). Welcome: Take the tour. Tour card: Next or Finish.
+- **Billed actions ask first, in place,** with the plain confirm (`panel`, `line-strong`), not the red one: billing is not destruction. Destructive actions keep the red confirm (Remove agent) or a required reason (Reject plan, Reject diff).
+- **Long waits are watched, not animated:** a Working panel with the static arc, the time since it started, and every field locked.
+- **Nothing granted by default.** The rights table starts empty, counts what will be granted, and warns in amber when no task may change files.
+- **The tour's highlight is a dashed `accent` line drawn inside its target, never an outline,** so it can't hide or be mistaken for the solid `focus` ring.
 
 ## Interaction states
 

@@ -167,6 +167,11 @@ Paste this into the app's main stylesheet (`apps/desktop/src/index.css` or where
   --text-control--line-height: 16px;
   --text-meta: 12px;
   --text-meta--line-height: 16px;
+  --text-welcome: 28px;
+  --text-welcome--line-height: 36px;
+  --container-form: 720px;
+  --container-content: 1120px;
+  --container-tour: 340px;
   --text-code-block: 12px;
   --text-code-block--line-height: 18px;
 }
@@ -200,4 +205,9 @@ Paste this into the app's main stylesheet (`apps/desktop/src/index.css` or where
 | Diff line | `block px-3 whitespace-pre` + `bg-diff-add-soft text-diff-add-ink` / `bg-diff-del-soft text-diff-del-ink` / `bg-diff-hunk-soft text-diff-hunk-ink` / `bg-diff-file-soft text-diff-file-ink font-semibold` / `text-diff-ctx-ink` |
 | Long text | `font-mono text-code-block whitespace-pre-wrap wrap-anywhere bg-code-bg border border-line rounded-md px-3 py-2 max-h-[240px] overflow-auto` |
 | Refusal alert | `flex gap-2 items-start px-3 py-2 rounded-md border border-problem-edge bg-problem-soft text-problem-ink text-[13px]` |
+| More options summary | `flex items-center gap-2 min-h-8 -ml-2 px-2 rounded-md cursor-pointer text-[13px] hover:bg-hover` · label `font-semibold text-ink` · hint `truncate text-meta text-ink-muted` · body `flex flex-col gap-3 pl-6 pb-4` (no left border) |
+| For developers | `rounded-lg border border-line bg-canvas` · tag `font-mono text-[11px] text-ink-muted border border-line rounded-full px-1.5` · editor `font-mono text-code-block bg-code-bg min-h-[360px] whitespace-pre` |
+| Form column | `max-w-form flex flex-col gap-4` |
+| Tour card | `w-tour rounded-lg border border-line-strong bg-surface p-4` · `backdrop:bg-transparent` |
+| Tour target | `relative after:absolute after:inset-0 after:rounded-[inherit] after:border-2 after:border-dashed after:border-accent after:pointer-events-none` (never an outline: the focus ring keeps working) |
 | Sidebar item | `flex items-center gap-2 w-full min-h-9 px-2 py-1.5 rounded-md text-left text-[13px] hover:bg-hover aria-[current=true]:bg-selected aria-[current=true]:font-semibold` |

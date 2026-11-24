@@ -157,6 +157,11 @@
   --text-control--line-height: 16px;
   --text-meta: 12px;
   --text-meta--line-height: 16px;
+  --text-welcome: 28px;
+  --text-welcome--line-height: 36px;
+  --container-form: 720px;
+  --container-content: 1120px;
+  --container-tour: 340px;
   --text-code-block: 12px;
   --text-code-block--line-height: 18px;
 }

@@ -12,4 +12,4 @@ The sidebar's list of runs, newest first, with the run id and a state marker in 
 - The waiting-diffs count is a small Needs-you pill (`needs-soft`, `needs-ink`, `needs-edge` border) with its meaning in text for screen readers ("2 diffs wait for you").
 - Default selection: the active run, else the newest.
 - Empty: since slice 4 the app opens **Ask for something** when there is no run, so the list is simply empty.
-- Later (the design pass): a tab row above the heading may switch between Runs, Plans and Your team; each tab keeps its own scroll position and selection.
+- Decided in the second pass: **Ask for something** and **Your team** sit above a tab row of **Runs** and **Plans** (the Plans tab carries the count of plans waiting for your OK), and the ViewFooter is pinned under the list. Each tab keeps its own scroll position and selection. A pending plan in the Plans list shows the Waiting for your OK badge.
