@@ -295,7 +295,8 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   re-reads it once after a 401 (the server writes a new one at every start) and turns failures
   into `ApiError` with a `kind`: `no-token`, `offline`, `unauthorized` or `http` (with the
   server's `detail`; FastAPI's field errors become `field: message` lines, and the parsed body
-  is kept as `ApiError.body`). `request` is `send` plus JSON; `jsonBody(body)` makes a JSON
+  is kept as `ApiError.body`; `fieldErrors(error)` reads them back one by one). `request` is
+  `send` plus JSON; `jsonBody(body)` makes a JSON
   request (POST unless a method is given). It logs every change it sends and every refusal as `<method> <path> answered <status>`,
   never a body.
 - **`src/api/events.ts`: `followEvents`.** It reads `GET /runs/{id}/events` with `fetch`, because
@@ -322,8 +323,12 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   confirm, ghost; busy shows the static arc), `StatusBadge`, `NeedsCount`, `Alert`,
   `CopyButton` and `copyText` (a failure logged by name, never the text), `Confirm` (asks first,
   in place, focus on the safe answer), `ReasonForm` (a required reason), `problem` (an error in
-  words), `TechnicalView` (true in the technical view), `MoreOptions` (technical fields, open
-  only in the technical view), `Field` (a labelled field with a hint), `BUTTON` and `FIELD`.
+  words), `plural`, `TechnicalView` (true in the technical view), `Fold` (a summary row with a
+  hint, then its content indented; a hand toggle is kept until the page is left),
+  `MoreOptions` (a `Fold` of technical fields that starts open only in the technical view, and
+  opens for a field error inside), `ForDevelopers` (work only developers do, folded in both
+  views), `Field` (a labelled field whose hint the input names with `aria-describedby`),
+  `FIELD`, `PAGE_TITLE` and `LEDE`.
 - **`src/index.css` and `src/Icon.tsx`: the design.** The Tailwind v4 theme from
   [docs/design/agentforge](docs/design/agentforge/README.md): only its colours exist (Tailwind's
   default palette is removed, and an unknown class is silently ignored, so use the design's
@@ -331,16 +336,21 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   design's stroke icon set; every icon sits beside a word.
 - **`src/proposals.ts`: the proposal screens' rules.** The proposal types, `Rights` and
   `NO_RIGHTS`, `approvalBody(repository, rights, agents)` (the approve body, refusing a bad timeout),
-  `parsePlan`, `newRunId`, `planTemplate`, `roundsOf(error)` and one function per request:
+  `parsePlan`, `newRunId`, `planTemplate`, `roundsOf(error)`, the words the screens show
+  (`rightsSummary`, `draftTitle`, `fixesHint`, `planningSince`) and one function per request:
   `planRequest`, `proposePlan`, `approveProposal`, `rejectProposal`.
-- **`src/ProposalPage.tsx`: plans.** `NewProposal` (Ask for something, and the JSON editor for
-  developers) and `ProposalPage` (one plan, its new agents, its approve-with-rights form and
-  reject). Technical fields sit in `MoreOptions`; the JSON editor follows `TechnicalView` too.
+- **`src/ProposalPage.tsx`: plans.** `NewProposal` (Ask for something, its planning panel, and
+  the JSON editor in `ForDevelopers`) and `ProposalPage` (one plan: its header, numbered task
+  cards, new agents, and while pending `Decide`, with the `TaskRights` table, and reject).
+  `STATUS` and `PLAN_GROUP` give a plan's status its words and badge. Technical fields sit in
+  `MoreOptions`.
 - **`src/agents.ts`: the team's rules.** `Agent`, `REASONING`, `PERSONA_LIMIT`, `toId(name)`,
   `agentPath`, `saveAgent` (PUT) and `removeAgent` (DELETE).
-- **`src/AgentsPage.tsx`: Your team.** The list, the inline editor and remove; `AgentFields`
-  (how it should work, and model and reasoning under More options) is shared with the plan
-  page's new agents, whose role stays as proposed; the editor adds the role.
+- **`src/AgentsPage.tsx`: Your team.** The grid of cards, the editor across the grid and
+  remove. `AgentFields` (how it should work with its counter, and model and reasoning under More
+  options) is shared with the plan page's new agents, whose role stays as proposed; the editor
+  adds the name and the role. `AgentSummary` (an agent at a glance) also draws a decided plan's
+  agents.
 - **`src/App.tsx`**: the status bar, the "can't reach its server" screen, the side list (Ask for
   something, Your team, and the Runs and Plans tabs with their counts of what waits for you; the
   plans and the active run's report polled with `GET /runs`) and the selected page; with no run
@@ -351,8 +361,9 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   `localStorage`, passed in; a bad or unreadable value falls back to the start and is logged
   by reason, never by its text), and `finishWelcome`, `endTour`, `setView` and `showAgain`.
 - **`src/GuideScreens.tsx`: the guide on screen.** `Welcome`, `Tour` (a modal `<dialog>` per
-  step, placed beside its target by CSS anchor positioning in `index.css`) and `ViewFooter`
-  (the side list's **View** switch and **Show the guide again**).
+  step, with a notch toward its target, which `index.css` marks with a dashed line) and
+  `ViewFooter` (the side list's **View** switch and **Show the guide again**). `placeCard`
+  works out the card's side and place from the measured target and window.
 - **`src/log.ts`**: console lines prefixed `agentforge.desktop:`. Ids, statuses, paths and
   reasons only, never the token or response text.
 

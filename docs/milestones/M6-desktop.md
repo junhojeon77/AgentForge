@@ -1,7 +1,7 @@
 # M6 — Desktop dashboard
 
 M6 gives AgentForge a window: a Tauri 2 desktop app to follow runs live, approve plans and
-diffs, control tasks and edit agents on screen. It was built in seven slices and is implemented within the limits below.
+diffs, control tasks and edit agents on screen. It was built in eight slices and is implemented within the limits below.
 
 The app is for people who do not code as well as those who do ([who it is
 for](../../README.md)): every screen leads with the plain path in plain words and keeps each
@@ -11,17 +11,86 @@ technical control one click away, under **More options** or a "for developers" s
 |---|---|---|
 | 1 | API additions the app needs: agent endpoints, lists, checks, CORS | Implemented on 2026-11-15 |
 | 2 | App shell (`apps/desktop`): token, API client, live events, connection states | Implemented on 2026-11-18 |
-| 3 | Runs: list, run page, controls, diff review | Implemented on 2026-11-20, with plain styling |
-| 4 | Proposals: list, detail, new from a request or by hand, approve with rights | Implemented on 2026-11-20, with plain styling |
-| 5 | Agent editor ("Your team"), and new agents the lead agent proposes with a plan | Implemented on 2026-11-20, with plain styling |
-| 6 | Visual design of the frame and the run screens, from a Claude Design pass | Implemented on 2026-11-21; Ask for something, plans and Your team wait for their own design |
-| 7 | Welcome screen, the plain or technical view (whether **More options** starts open) and a tour, changeable later | Implemented on 2026-11-22, with plain styling |
+| 3 | Runs: list, run page, controls, diff review | Implemented on 2026-11-20; styled in slice 6 |
+| 4 | Proposals: list, detail, new from a request or by hand, approve with rights | Implemented on 2026-11-20; styled in slice 8 |
+| 5 | Agent editor ("Your team"), and new agents the lead agent proposes with a plan | Implemented on 2026-11-20; styled in slice 8 |
+| 6 | Visual design of the frame and the run screens, from a Claude Design pass | Implemented on 2026-11-21 |
+| 7 | Welcome screen, the plain or technical view (whether **More options** starts open) and a tour, changeable later | Implemented on 2026-11-22; styled in slice 8 |
+| 8 | Visual design of Ask for something, the plan page, Your team, the welcome screen and the tour, from a second Claude Design pass | Implemented on 2026-11-23 |
 
 Slice 1 is the API side, slice 2 the app's shell, slice 3 the run screens, slice 4 the proposal
-screens, slice 5 the agent editor, slice 6 the visual design of the frame and the run screens and
-slice 7 the welcome screen, the view choice and the tour. Ask for something, the plan page, Your
-team, the welcome screen and the tour keep their plain layout until their own design pass; they
-already use the theme's colours and the restyled buttons and fields.
+screens, slice 5 the agent editor, slice 6 the visual design of the frame and the run screens,
+slice 7 the welcome screen, the view choice and the tour, and slice 8 the visual design of every
+screen slice 6 left plain.
+
+## Delivered behavior (slice 8)
+
+**The design's second pass.** Claude Design made the screens slice 6 had no design for. The copy
+in [docs/design/agentforge](../design/agentforge/README.md) is now that second pass; the run
+screens did not change. Forms and prose stop at a readable width (720px); task cards, the rights
+table and the team use the full width.
+
+**More options** is now a fold with a hint of what is inside and its values ("Run name
+`req-20261123-013000` · 2 revisions"; "1 attempt · no time limit"; "default model · medium
+reasoning"). The view decides whether it starts open; one you open or fold by hand stays that way
+until you leave the page, even when the view changes. A field error inside it opens it.
+
+**Ask for something.** "What do you want built?" comes first and has the focus. **Plan it** says
+why it cannot be pressed yet ("Say what you want built first.", "Name the project folder
+first.", "Give the run a name first (under More options).") and still asks first, because
+planning is billed. While the lead agent plans, a panel says so with the time since it started
+("Started 2 minutes ago."), and every field waits. If no plan was made, the server's reason is
+quoted with each draft's issues (drafts count from 1: "Draft 1, found by the rule check:"), and
+the button becomes **Plan it again** ("Each try is billed."). **Write the plan yourself (for
+developers)** now starts folded in both views: the view opens only **More options**.
+
+**A plan's page.** The header has the plan's id, its status as a badge and who wrote it ("Written
+by the lead agent · 4 tasks"). An approved plan says "Approved: it runs as run `<id>`." with
+**Open run**; a rejected one quotes your reason. "What the lead agent fixed along the way" is a
+fold with a hint ("2 drafts, 3 issues fixed") and starts folded in both views. Each task is a
+numbered card, in the plan's order: title, id, role and what it comes after, then what it must
+do beside "Done when" (one column when the page is narrow).
+
+- **The rights table.** One row per task: May change files, the checks, and under each row's
+  More options running checks itself, attempts and a time limit. A bar on top says nothing is
+  allowed until you tick it and offers **Let every task change files**, which ticks only that
+  box. Each check's command is listed once, under the table. A line counts what will be granted
+  ("3 of 4 tasks may change files · 6 checks run before work is accepted · up to 4 billed
+  attempts."); while no task may change files it is an amber notice instead. The rows stack
+  when the table is narrow.
+- **New agents** proposed with the plan are shown as editors: the role cannot change ("Set by
+  the plan: task api needs an agent with this role."), the rest can.
+- A refused approve quotes the server; when a run is active it adds "Wait for it to finish, or
+  cancel it, then approve again." **Reject plan** is an outlined button, enabled once the reason
+  has text.
+
+**Your team** is a grid of cards: the agent's id, its role, model and reasoning, and the first
+three lines of how it should work (or "No instructions yet: it works from its role alone."), with
+**Edit** and **Remove**. **Add an agent** is the page's main button. The last agent's Remove is
+greyed out ("Your only agent. Add another before removing it."). The editor opens across the
+grid:
+
+- A new agent's name shows its id as you type ("Saved as `email-sender`"); a name already in the
+  team says so and offers **Edit `<name>`**.
+- **Role** suggests the team's roles. "How it should work" counts its characters and turns amber
+  past 9,500 of 10,000.
+- A refusal lists one line per field, named as on screen ("How it should work: <the server's
+  message>").
+- Escape cancels only while nothing was changed. The focus starts in the form and goes back to
+  **Edit** or **Add an agent** when it closes.
+
+**The welcome screen** fills the window in two columns (one in a narrow window): what AgentForge
+does, the four steps, the view as two large choices, and **Take the tour**. The view is saved as
+soon as you pick it.
+
+**The tour.** The part each step explains gets a dashed accent line inside it, so the solid focus
+ring stays recognisable. The card has a small pointer toward that part and sits on the side with
+room (right of the side list, under the status bar, above the View switch), moving to another
+side when the window is too small or is resized. When the tour ends, the focus goes back to
+where it was. A tour chosen while the server is off still starts once the app connects.
+
+**The View switch** under the side list is a quieter strip, and **Show the guide again** is a
+small text button.
 
 ## Delivered behavior (slice 7)
 
@@ -32,10 +101,12 @@ plan, the team builds, review each change). It then asks "How should the app loo
 - **Plain**: technical options start folded under **More options**. This is the default.
 - **Technical**: they start open.
 
-The view covers every **More options** section and **Write the plan yourself (for developers)**.
+The view covers every **More options** section (and, until slice 8, **Write the plan yourself (for
+developers)**, which now starts folded in both views).
 A run's attempts, its diffs and "What the lead agent fixed along the way" are content, not
 technical controls, so they open as before. Switching the view opens or folds every section on
-screen at once; you can still open or fold one by hand.
+screen at once; you can still open or fold one by hand (since slice 8, a section opened or
+folded by hand keeps that state when the view changes).
 
 **The tour.** The welcome screen ends with **Take the tour** or **Skip the tour**. The tour is
 six cards, one at a time ("Step 2 of 6"):
@@ -47,7 +118,8 @@ six cards, one at a time ("Step 2 of 6"):
 5. The status bar
 6. The **View** switch
 
-Each card sits beside the part it explains, which gets an accent ring. It is a modal dialog, so
+Each card sits beside the part it explains, which gets an accent ring (a dashed line since slice
+8). It is a modal dialog, so
 the rest of the window waits until the tour ends. **Back** and **Next** move between cards, and
 **Finish** on the last card ends the tour. **End tour** or Escape stops it early, and the focus
 stays on **Next**. The cards point at the side list, which exists only while the app is
@@ -373,8 +445,9 @@ run report; the console lines above are their record.
   other. Clearing the WebView2 data starts over.
 - **The tour points at the side list and the status bar only;** it does not open pages or show
   what a run looks like.
-- **Ask for something, the plan page, Your team, the welcome screen and the tour keep their
-  plain layout** until their own design pass; only their colours and shared buttons and fields follow the design.
+- **A plan's tasks are listed in the plan's order,** which need not be the order they start in;
+  "after `api`" on each card says what it waits for.
+- **The planning panel's time moves in whole minutes** and is checked every 15 seconds.
 - **The active run's report is read every 2 seconds** for the waiting-diffs count, on top of the
   reloads its live events cause.
 - **The theme follows Windows;** there is no light or dark switch in the app.
@@ -387,13 +460,27 @@ run report; the console lines above are their record.
 
 | Deferred | Waits for |
 |---|---|
-| A visual design for Ask for something, the plan page, Your team, the welcome screen and the tour | Their own Claude Design pass |
 | A command-line option for allowed origins | When a second client needs it |
 
 ## Acceptance checks
 
 Run the pytest and Ruff commands in the root README, plus `npm --prefix apps/desktop test` and
-`npm --prefix apps/desktop run build`. Slice 7's tests:
+`npm --prefix apps/desktop run build`. Slice 8's tests:
+
+- `proposals.test.ts`: the rights summary (none while no task may change files; tasks, checks and
+  billed attempts counted; the singular for one); a draft's title counted from 1, by the rule
+  check or the lead agent's review; the fixes hint; the time since planning started, in whole
+  minutes.
+- `client.test.ts`: each field error of a 422 read with the server's words, and none for a
+  refusal in words, a lost server or another error.
+- `guide.test.ts`: the tour card's place: right of a side-list item with its notch at the
+  item's middle; below it when the window has no room on either side; below the status bar;
+  above the footer, or below it when there is no room above; inside a window too small for any
+  side; the notch kept within the card.
+
+The new look, the folds, the rights table, the team grid and the tour's notch have no tests of
+their own (that would need a DOM library); `tsc` and the window check cover them. Slice 7's
+tests:
 
 - `guide.test.ts`: the start (plain view, welcome shown) when nothing is saved; saved choices
   read back; text that is not JSON, an unknown view or tour state, a welcome flag that is not
