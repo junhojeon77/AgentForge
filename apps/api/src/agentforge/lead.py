@@ -103,7 +103,8 @@ _TASK_RULES = (
     "write acceptance criteria a reviewer can check. If part of the work fits none of these "
     "roles, you may add an agent for it in new_agents: an id of a-z, 0-9, '-' and '_', a new "
     "role, and a persona telling it how to work. Add one only when no role fits; a person "
-    "approves it before it exists.\n"
+    "approves it before it exists. AgentForge adds a review after every task that edits files, "
+    "so plan no reviews of this plan's own tasks.\n"
 )
 _DRAFT = PromptTemplate.from_template(_INTRO + _TASK_RULES + "Request:\n{request}\n")
 _CRITIQUE = PromptTemplate.from_template(

@@ -16,6 +16,10 @@ A worker can now change code without touching your checkout:
 
 No new dependency was added; Git and `asyncio` subprocesses do the work. The scheduler is unchanged.
 
+Worktrees are still not merged back (M7). Since 2026-11-24 a task is handed the diffs of the
+finished tasks it waits for instead (`Assignment.dependency_diffs`; see the
+[M5 doc](M5-api.md#reviews-and-fix-plans-added-on-2026-11-24)).
+
 ## Contract
 
 | Item | Behavior |

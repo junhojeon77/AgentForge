@@ -1,6 +1,6 @@
 # Roadmap
 
-The goal: one lead agent coordinates specialized coding agents. Five ship by default, and users
+The goal: one lead agent coordinates specialized coding agents. Seven ship by default, and users
 can add, remove or fully customize any of them. Adding, removing and editing agent files works
 today (M2), over the local API since M6's first slice and on screen since slice 5, when the
 lead agent also became able to propose a new agent with a plan (a person approves it).
@@ -15,8 +15,12 @@ side list changes it later) and offers a short tour.
 AgentForge is built in milestones. M1 to M6 are implemented; M6 came in eight slices (the API
 additions for the desktop app, the app's shell, the run screens, the proposal screens, the agent
 editor, the visual design of the frame and run screens, the welcome screen with its view choice
-and tour, and the visual design of the remaining screens). The rest is direction, not a promise, and not permission to start a later
-milestone early (see [GOVERNANCE.md](GOVERNANCE.md)).
+and tour, and the visual design of the remaining screens). On 2026-11-24 the reviewer and auditor
+agents joined the defaults, every task given "edit" got a review added at approval, and the lead
+agent can plan fixes from a finished run's reviews (see the
+[M5 doc](docs/milestones/M5-api.md#reviews-and-fix-plans-added-on-2026-11-24)). The rest is
+direction, not a promise, and not permission to start a later milestone early (see
+[GOVERNANCE.md](GOVERNANCE.md)).
 
 | Milestone | Scope | Status |
 |---|---|---|
@@ -26,7 +30,7 @@ milestone early (see [GOVERNANCE.md](GOVERNANCE.md)).
 | M4 | Lead orchestration, retries, pause/resume, persistence and recovery | Retries, pause/resume, persistence and recovery implemented within [documented limits](docs/milestones/M4-orchestration.md); the lead agent implemented on 2026-11-15 |
 | M5 | FastAPI REST commands, approvals and SSE events | Implemented within [documented limits](docs/milestones/M5-api.md) on 2026-11-15 |
 | M6 | Tauri 2 desktop dashboard (React, TypeScript), including on-screen agent editing | Implemented within [documented limits](docs/milestones/M6-desktop.md): slice 1 (API additions) implemented on 2026-11-15, slice 2 (the app shell in `apps/desktop`) on 2026-11-18, slice 3 (the run screens, plain styling), slice 4 (the proposal screens: ask for something, approve with rights) and slice 5 (the agent editor, and new agents from the lead) on 2026-11-20, slice 6 (the visual design of the frame and the run screens) on 2026-11-21, slice 7 (the welcome screen, the plain or technical view and the tour) on 2026-11-22, slice 8 (the visual design of Ask for something, the plan page, Your team, the welcome screen and the tour) on 2026-11-23 |
-| M7 | Integration candidates, conflict detection, review and approved integration | Planned |
+| M7 | Integration candidates, conflict detection, review and approved integration; a slice that audits the result: once something built is integrated, the auditor agent audits the merged code, and its report feeds the lead agent's fix planning as reviews do | Planned |
 | M8 | Windows packaging, backend lifecycle, secure local communication and recovery checks | Planned |
 
 SQLAlchemy and Alembic were added for M4's persistence, and LangGraph and LangChain core for the
@@ -47,7 +51,8 @@ finished on 2026-11-14, and workers running their own checks on 2026-11-15. Deta
 From M4: a delay between attempts and a pause that lets running work finish. The manual retry
 command and running a plan from a request came with M5. Details are in the
 [M4 doc](docs/milestones/M4-orchestration.md#not-implemented-yet).
-From M5: several runs at once; the agent persona endpoints came with M6's first slice. Details
+From M5: several runs at once, and approving the rights of an edit-mode check run separately;
+the agent persona endpoints came with M6's first slice. Details
 are in the [M5 doc](docs/milestones/M5-api.md#not-implemented-yet).
 From M6: a command-line option for allowed origins. Details are in the
 [M6 doc](docs/milestones/M6-desktop.md#not-implemented-yet).
@@ -76,6 +81,12 @@ From M6: a command-line option for allowed origins. Details are in the
   calls the existing `agentforge.personas` functions.
 
 ## Verification history
+
+Verified on 2026-11-24 after the reviewer and auditor agents, a review after every change and fix
+plans from reviews: **259 tests passed and 1 skipped** (6 new), Ruff lint passed, and all 33
+Python files passed the formatting check; **168 Vitest tests passed** (6 new), and the desktop
+`tsc` type check and Vite build passed. The window was not opened. No billed call was made: the
+lead agent and the workers were fakes.
 
 Verified on 2026-11-24 after the nine fixes from the repo audit (a task blocked again when a
 retry leaves another dependency failed; a taken run name refused before billed planning; a

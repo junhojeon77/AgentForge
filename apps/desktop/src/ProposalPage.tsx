@@ -162,6 +162,12 @@ export function ProposalPage({
         <p className="text-meta text-ink-muted">
           Written {proposal.source === "lead" ? "by the lead agent" : "by hand"} ·{" "}
           {plural(tasks.length, "task", "tasks")}
+          {proposal.fixes && (
+            <>
+              {" "}
+              · Fixes the reviews of run <code className="font-mono">{proposal.fixes}</code>
+            </>
+          )}
         </p>
       </header>
       {status === "approved" && (
@@ -306,7 +312,8 @@ function Decide({
             Approve and start
           </h2>
           <p className={LEDE}>
-            A task left as it is can only read your files. Tick what each task may do.
+            A task left as it is can only read your files. Tick what each task may do. After each
+            task you let edit, the reviewer checks its change.
           </p>
         </div>
         <div className="max-w-form">

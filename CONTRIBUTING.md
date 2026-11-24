@@ -137,7 +137,9 @@ state is lost when the process exits.
     task is terminal. A new run is refused while a previous run's tasks are still cleaning up.
   - `_dispatch()` promotes PENDING→READY when all dependencies are COMPLETED. It sorts READY tasks
     by `(-priority, id)`, reserves the lowest-ID idle worker of the matching role, and spawns one
-    asyncio task per assignment, up to `max_concurrency` (1–5).
+    asyncio task per assignment, up to `max_concurrency` (1–5). Each assignment carries
+    `dependency_diffs`: the diff of every finished dependency that changed files
+    (`_finished_diff`), since worktrees are not merged before M7.
   - `_execute()` runs RUNNING → executor → result validation → VALIDATING → validator →
     COMPLETED/FAILED. Its `finally` fails a task that is still RUNNING or VALIDATING (a
     `BaseException` that bypassed the handlers), releases the worker, drops the active task and
@@ -195,8 +197,8 @@ state is lost when the process exits.
   on stdin, a fresh `--session-id`, `--effort`/`--model` from `AgentConfig`, the persona as
   `--append-system-prompt`, the `WorkerResult` schema via `--json-schema`, and a
   `--max-budget-usd` cap. Every event goes to `on_event`; the final `result.structured_output`
-  becomes the `WorkerResult`. On a retry the prompt also carries `previous_failure`, labelled as
-  data, not instructions. The session id comes from `Assignment.session_id`. With
+  becomes the `WorkerResult`. On a retry the prompt also carries `previous_failure`, and a task
+  with finished dependencies their `dependency_diffs`, both labelled as data, not instructions. The session id comes from `Assignment.session_id`. With
   `Assignment.resume` it runs `--resume <id>` and a short "continue" prompt instead; if the CLI
   says it has no such session, it starts one fresh session in the same folder. An error result → `WORKER_FAILURE`, no result →
   `EXECUTOR_EXCEPTION`, and cancellation kills the process. The CLI is usually not on PATH: pass
@@ -229,7 +231,8 @@ state is lost when the process exits.
   scheduler applies, so the two cannot drift. `TaskDraft` lists the only fields the model may
   set; rights and limits come from `task_defaults`. `AgentDraft` (in `PlanDraft.new_agents`) is
   a new agent the model may propose; `_new_agents` checks it (id, clash with `agent_ids`, role,
-  use) and the API saves it only when a person approves the plan.
+  use) and the API saves it only when a person approves the plan. `_TASK_RULES` tells the model
+  that AgentForge adds the reviews itself.
 - **`validation.py`: `CommandValidator`.** Runs each `check:<name>` constraint as a configured
   argv (no shell) in the result's workspace with a timeout. It rejects on a non-zero exit, a
   timeout or an unknown check, and never reads the worker's `passed_checks`. Timeout and
@@ -248,7 +251,11 @@ state is lost when the process exits.
   `secrets.compare_digest`. `_Server` holds the store, the one active run (`launch` starts it
   as an asyncio task and turns an early `ValueError` into a 400) and the event-stream queues
   that `Scheduler(on_transition=...)` feeds. `_granted` applies the rights a person gives on
-  approval; every task defaults to read-only. `serve` runs uvicorn on 127.0.0.1 only.
+  approval; every task defaults to read-only. `_with_reviews` then adds a read-only
+  `review-<id>` task (role `REVIEW_ROLE`) after every task given `"edit"`, and logs their ids. `lead_plans` is the
+  one planning path for `POST /proposals/from-request` and `POST /runs/{id}/fix-plan`; the
+  latter builds its request from `_reviews(report)` with `_fix_request` and sets
+  `Proposal.fixes`. `serve` runs uvicorn on 127.0.0.1 only.
   Since M6: `_Server.agents()` reads `ApiSettings.agents` again for every plan check and run
   start (injected test workers skip it), so an edit applies from the next run; the agent routes
   are plain `def` so FastAPI runs their file I/O in a thread; `CORSMiddleware` allows only
@@ -264,7 +271,8 @@ state is lost when the process exits.
   `claude "<task>"` runs one read-only task with `ClaudeCodeExecutor` for every agent in the
   persona folder (or the defaults) and prints the report. A missing folder or an unknown role
   stops it before Claude starts. `clean <run_id> --repo --root` calls `worktrees.remove_run`.
-  `serve` writes a new token file and starts `api.serve`; it imports the web stack only then.
+  `serve` stops if its port is in use, before it writes a new token file, then starts
+  `api.serve`; it imports the web stack only then.
 
 Tests are in `apps/api/tests/`:
 - `test_contracts.py`: contract validation and immutability.
@@ -312,13 +320,15 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   `retriesLeft`, `attemptStartsOpen`, `reviewAttempt` (the attempt whose review band is on
   screen, so a refused approve shows under the card once the band is gone), `diffLines(diff)`
   (each line's tone by where it is: outside a hunk a file header, inside one a change, so a
-  removed `-- note` stays a removed line) and `diffStats`, `stripAnsi`, and
+  removed `-- note` stays a removed line) and `diffStats`, `stripAnsi`, `hasReviews(run)`
+  (whether a finished review found "Must fix" findings, as `_reviews` in `api.py` decides), and
   `sendControl(client, runId, action, task?, reason?)`, which POSTs a run or task control.
 - **`src/RunPage.tsx`: one run.** `runQuery` reads `GET /runs/{id}` with TanStack Query (the side
   list shares it for the active run's count); while the run is active, the page reloads it on
   every `followEvents` event. The header, task cards, every attempt with its diff, the review
   band and the history with its task filter. `useControl` gives the header and each card their
-  own pending state and refusal.
+  own pending state and refusal. `FixPlan` (a finished run with "Must fix" reviews) asks
+  before the billed planning, then opens the new plan.
 - **`src/ui.tsx`: the pieces every screen shares.** `Button` (primary, secondary, destructive,
   confirm, ghost; busy shows the static arc), `StatusBadge`, `NeedsCount`, `Alert`,
   `CopyButton` and `copyText` (a failure logged by name, never the text), `Confirm` (asks first,
@@ -338,7 +348,7 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   `NO_RIGHTS`, `approvalBody(repository, rights, agents)` (the approve body, refusing a bad timeout),
   `parsePlan`, `newRunId`, `planTemplate`, `roundsOf(error)`, the words the screens show
   (`rightsSummary`, `draftTitle`, `fixesHint`, `planningSince`) and one function per request:
-  `planRequest`, `proposePlan`, `approveProposal`, `rejectProposal`.
+  `planRequest`, `planFixes`, `proposePlan`, `approveProposal`, `rejectProposal`.
 - **`src/ProposalPage.tsx`: plans.** `NewProposal` (Ask for something, its planning panel, and
   the JSON editor in `ForDevelopers`) and `ProposalPage` (one plan: its header, numbered task
   cards, new agents, and while pending `Decide`, with the `TaskRights` table, and reject).

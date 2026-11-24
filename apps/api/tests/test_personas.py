@@ -4,17 +4,22 @@ from agentforge.domain import AgentConfig
 from agentforge.mocks import DEFAULT_ROLES
 from agentforge.personas import check_id, load_agents, remove_agent, save_agent, setup
 
+DEFAULT_IDS = {*DEFAULT_ROLES, "auditor", "reviewer"}
 
-def test_setup_creates_the_five_default_personas(tmp_path):
+
+def test_setup_creates_the_seven_default_personas(tmp_path):
     folder = setup(tmp_path / "agents")
     assert sorted(path.name for path in folder.glob("*.md")) == sorted(
-        f"{role}.md" for role in DEFAULT_ROLES
+        f"{agent_id}.md" for agent_id in DEFAULT_IDS
     )
     agents = {agent.id: agent for agent in load_agents(folder)}
-    assert set(agents) == set(DEFAULT_ROLES)
+    assert set(agents) == DEFAULT_IDS
     assert all(agent.role == agent.id and agent.persona for agent in agents.values())
     assert agents["qa"].reasoning == "high" and agents["backend"].reasoning == "medium"
+    assert agents["auditor"].reasoning == "high" and agents["reviewer"].reasoning == "high"
     assert all(agent.model is None for agent in agents.values())
+    # Adapted from outside skills; the skills' own name must not leak into a shipped persona.
+    assert not any("ponytail" in agent.persona.lower() for agent in agents.values())
 
 
 def test_setup_never_overwrites_edits_or_restores_removed_agents(tmp_path):

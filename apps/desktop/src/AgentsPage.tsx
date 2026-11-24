@@ -276,7 +276,7 @@ function AgentCard({
   client: Client;
   agent: Agent;
   /** The last agent: the server refuses to remove it, since an empty team brings back the
-   * five defaults. */
+   * seven defaults. */
   only: boolean;
   /** Takes the focus back when its editor closes. */
   focus: boolean;

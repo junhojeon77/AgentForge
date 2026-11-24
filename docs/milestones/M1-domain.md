@@ -10,8 +10,10 @@ dispatches eligible tasks to compatible mock workers, independently validates re
 returns an immutable report. Each scheduler executes one run at a time; sequential runs reset task
 state and history while retaining registered workers.
 
-Five defaults are provided by `register_default_workers`: backend, frontend, database, QA, and
-integration. The five are defaults, not a fixed team: any number of workers can be registered.
+`register_default_workers` registers one worker per shipped default agent: backend, frontend,
+database, QA and integration, plus the reviewer and the auditor added on 2026-11-24 (the demo
+still gives tasks to the first five only). These are defaults, not a fixed team: any number of
+workers can be registered.
 Roles are arbitrary nonempty strings. Multiple workers can share a role, and the lead
 orchestrator is not registered as a worker. In M1, model names, reasoning levels,
 repository references, and workspace references are descriptive configuration only. M2's Claude Code

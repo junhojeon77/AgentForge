@@ -8,6 +8,7 @@ import {
   NO_RIGHTS,
   newRunId,
   parsePlan,
+  planFixes,
   planningSince,
   planRequest,
   planTemplate,
@@ -120,6 +121,15 @@ describe("requests", () => {
 
     expect(request.mock.calls[0][0]).toBe("/proposals/from-request");
     expect(sentJson(request)).toEqual(body);
+  });
+
+  it("asks the lead agent to plan fixes from a run's reviews", async () => {
+    const request = fakeRequest();
+
+    await planFixes({ request }, "r 1", { run_id: "fix1" });
+
+    expect(request.mock.calls[0][0]).toBe("/runs/r%201/fix-plan");
+    expect(sentJson(request)).toEqual({ run_id: "fix1" });
   });
 
   it("sends a hand-written plan as it was written", async () => {

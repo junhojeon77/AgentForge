@@ -12,7 +12,7 @@ can read, search and list files in the task's workspace, but they cannot edit fi
 
 Agents are fully customizable. `agentforge.personas` keeps each agent as one editable Markdown file.
 You can add an agent with any id and role, remove any agent (the defaults included), and change
-each agent's model, reasoning level and persona. `python -m agentforge setup` copies the five
+each agent's model, reasoning level and persona. `python -m agentforge setup` copies the seven
 defaults only into a folder that has no personas yet.
 
 M2 originally named a Codex adapter on the roadmap. It was switched to Claude Code by decision on
@@ -89,7 +89,7 @@ The three items M2 had deferred are now built.
 |---|---|
 | `TaskSpec.timeout_seconds` | Optional, a positive number of seconds; `None` (the default) means no limit. It applies to each attempt's worker, not to validation (checks have their own timeout). When it runs out, the scheduler cancels the worker, which kills the Claude Code process, and the attempt fails as `WORKER_TIMEOUT` with the message `worker timed out after 30s`. It is retried like any other failure while attempts remain. A `TimeoutError` the worker raises itself stays an `EXECUTOR_EXCEPTION` |
 | `AgentConfig.model` | Must start with a letter or digit and contain only letters, digits and `. _ : / @ [ ] -`. This accepts aliases such as `opus` and ids such as `claude-opus-5-5[1m]`, and rejects spaces, line breaks and a value that could be read as a flag. A persona file with a bad model fails to load, naming the file. It does not check that the model exists |
-| `python -m agentforge claude "<task>"` | Runs one read-only task with Claude Code and prints the report as JSON. Options: `--workspace` (default: the current folder), `--role` (default `qa`), `--timeout` seconds, and `--command` (default: `$AGENTFORGE_CLAUDE`, else `claude`). Workers come from the persona folder, or the five defaults when it has none. It prints a billing notice first. A missing folder or a role no agent has stops it before Claude starts (exit 2). Exit 0 when the task completed, 1 otherwise |
+| `python -m agentforge claude "<task>"` | Runs one read-only task with Claude Code and prints the report as JSON. Options: `--workspace` (default: the current folder), `--role` (default `qa`), `--timeout` seconds, and `--command` (default: `$AGENTFORGE_CLAUDE`, else `claude`). Workers come from the persona folder, or the seven defaults when it has none. It prints a billing notice first. A missing folder or a role no agent has stops it before Claude starts (exit 2). Exit 0 when the task completed, 1 otherwise |
 
 ## Not implemented yet
 

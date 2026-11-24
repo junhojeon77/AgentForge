@@ -107,6 +107,9 @@ class Assignment(Contract):
     worker: AgentConfig
     attempt_number: int = 1
     previous_failure: str = ""  # why the last attempt failed; empty on the first
+    # (task id, diff) of each finished dependency that changed files. Worktrees are not merged
+    # yet (M7), so this is the only way a task sees the work it waits for.
+    dependency_diffs: tuple[tuple[str, str], ...] = ()
     # Chosen by the scheduler, so an attempt stopped by a pause can still be continued.
     session_id: str | None = None
     resume: bool = False  # continue this attempt's interrupted work instead of starting it
@@ -164,6 +167,7 @@ class Proposal(Contract):
     agents: tuple[AgentConfig, ...] = ()  # new agents the lead wants; made only on approval
     status: Literal["pending", "approved", "rejected"] = "pending"
     reason: str = ""  # why it was rejected
+    fixes: str = ""  # the run whose reviews the lead agent planned fixes for
 
 
 class RunReport(Contract):

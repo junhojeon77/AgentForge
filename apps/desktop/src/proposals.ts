@@ -28,6 +28,7 @@ export interface Proposal {
   status: "pending" | "approved" | "rejected";
   reason: string;
   agents: Agent[]; // new agents the lead wants; made only when the plan is approved
+  fixes: string; // the run whose reviews this plan fixes, or ""
 }
 
 /** One task's rights as the approve form holds them. */
@@ -146,6 +147,15 @@ export function planRequest(
   body: { request: string; run_id: string; workspace: string; max_revisions: number },
 ): Promise<Proposal> {
   return client.request("/proposals/from-request", jsonBody(body));
+}
+
+/** The lead agent plans fixes for what a finished run's reviews say must be fixed (billed). */
+export function planFixes(
+  client: Requester,
+  runId: string,
+  body: { run_id: string },
+): Promise<Proposal> {
+  return client.request(`/runs/${encodeURIComponent(runId)}/fix-plan`, jsonBody(body));
 }
 
 export async function proposePlan(client: Requester, text: string): Promise<Proposal> {

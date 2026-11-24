@@ -1,7 +1,7 @@
 # AgentForge
 
 A local-first Windows platform where one lead agent coordinates specialized coding agents. It ships
-with five, and you can add, remove or fully customize any of them.
+with seven, and you can add, remove or fully customize any of them.
 
 **Who it is for.** People who do not code: you ask for something in your own words, the
 lead agent plans it, you approve the plan, and the team of agents builds it. People who do code
@@ -16,16 +16,17 @@ local REST API with approvals and live events. The desktop app (M6) is implement
 runs and follows each one live, with its diffs to approve or reject and controls to pause,
 cancel, retry or recover work, and starts runs: ask for something in plain words, then approve
 the lead agent's plan with the rights each task gets, and edits your team of agents (the lead
-agent can propose a new one with a plan). Its frame and run screens follow the visual design
-(dark when Windows is dark). On first start a welcome screen explains the app, asks for the plain
-or technical view and offers a short tour. A design for the remaining screens is planned.
+agent can propose a new one with a plan). Every screen follows the visual design (dark when
+Windows is dark). On first start a welcome screen explains the app, asks for the plain or
+technical view and offers a short tour.
 
 ## What is AgentForge
 
 AgentForge is a planned Windows desktop platform for coordinating software development agents. A
 lead agent breaks a request into tasks, and specialized workers carry them out under deterministic
-control and human approval. Five agents come by default (backend, frontend, database, QA and
-integration). The team is yours to shape: add or remove agents, and set each one's role, model,
+control and human approval. Seven agents come by default: five that build (backend, frontend,
+database, QA and integration), a reviewer that checks every change, and an auditor that reviews a
+whole repository. The team is yours to shape: add or remove agents, and set each one's role, model,
 reasoning level and persona. At most five run at once.
 
 What exists today is the core library (`apps/api/src/agentforge`):
@@ -92,8 +93,11 @@ flowchart LR
 - **One worktree per task.** Edits happen in a separate Git worktree, never in your checkout.
   AgentForge records the diff with Git instead of asking the worker what it changed.
 - **Editable personas.** Each agent is one Markdown file: its settings plus a persona that the
-  Claude Code worker adds to its system prompt. Setup gives you the five defaults, and you can
+  Claude Code worker adds to its system prompt. Setup gives you the seven defaults, and you can
   edit, add or remove agents.
+- **Every change is reviewed.** When you approve a plan, AgentForge adds a review task after each
+  task you let edit, and hands the reviewer that task's diff. From a finished run's reviews, the
+  lead agent can plan the fixes; that plan waits for your approval like any other.
 
 A run can be saved to SQLite and recovered after a restart; without a store it lives in memory only.
 What is built and what is planned (the API and the desktop app) is in
@@ -138,7 +142,7 @@ repository.
 .\.venv\Scripts\python.exe -m agentforge setup
 ```
 
-This creates `%APPDATA%\AgentForge\agents` with the five default personas and prints the path.
+This creates `%APPDATA%\AgentForge\agents` with the seven default personas and prints the path.
 Running it again never overwrites your edits. See [Agents and personas](#agents-and-personas).
 
 ### 3. Run Claude Code workers
@@ -308,7 +312,10 @@ that is still running), `serve` stops before writing its token, so the running o
 Send it as `Authorization: Bearer <token>`.
 Propose a plan (`POST /proposals`, or `/proposals/from-request` for the lead agent), approve it
 with the rights each task gets, then approve each worker's diff before its checks run, and
-follow it all on `GET /runs/{id}/events`. `GET /runs`, `GET /proposals` and `GET /checks` list
+follow it all on `GET /runs/{id}/events`. Every task you let edit gets a `review-<id>` task
+after it (the team needs an agent with role `reviewer`). Once a run has finished,
+`POST /runs/{id}/fix-plan` has the lead agent plan fixes for what its reviews say must be fixed
+(billed; only reviews with "Must fix" findings count). `GET /runs`, `GET /proposals` and `GET /checks` list
 what is there, and the agent routes are under [Agents and personas](#agents-and-personas).
 Endpoints and limits are in [the M5 doc](docs/milestones/M5-api.md) and
 [the M6 doc](docs/milestones/M6-desktop.md).
@@ -337,7 +344,11 @@ token from `%APPDATA%\AgentForge\api-token` again after each server restart.
 To start a run, choose **Ask for something**, say what you want and name your project folder.
 The lead agent plans it (billed; the app asks first), and the plan waits under **Plans** for your
 OK. Tick what each task may do (change files, which checks run before its work is accepted),
-then **Approve and start**; or reject it with a reason. Developers can write the plan as JSON
+then **Approve and start**; or reject it with a reason. After each task you let edit, the
+reviewer checks its change, and its report shows on the run's page. When a review of a finished
+run found something that must be fixed, **Plan fixes from the reviews** asks you first (it is
+billed), then asks the lead agent for a plan that fixes it; the plan opens under **Plans** for
+your OK. Developers can write the plan as JSON
 instead, and set attempts and time limits under **More options**.
 
 **Your team** lists your agents: add one, change its role or how it should work (model and
@@ -380,7 +391,9 @@ You are the backend engineer on an AgentForge team. ...
 
 The persona text (up to 10,000 characters) is added to the Claude Code worker's system prompt.
 
-- **Defaults:** backend, frontend, database, qa and integration. They ship in
+- **Defaults:** backend, frontend, database, qa, integration, reviewer and auditor. The reviewer
+  checks one change and the auditor a whole folder or repository; both only report, in plain
+  words, and change nothing. They ship in
   [apps/api/src/agentforge/default_personas](apps/api/src/agentforge/default_personas) and are
   copied to `%APPDATA%\AgentForge\agents` by `python -m agentforge setup`, but only when that
   folder has no agents yet.
@@ -392,7 +405,9 @@ The persona text (up to 10,000 characters) is added to the Claude Code worker's 
 These functions are in `agentforge.personas`. The local API calls them too: `GET /agents`,
 `PUT /agents/{id}` and `DELETE /agents/{id}`. An edit applies from the next run; the running run
 keeps its agents. The API refuses to remove the last agent, because an empty folder brings back
-the five defaults. The desktop app edits them on screen (**Your team**), and the lead agent may
+the seven defaults. A folder made before the reviewer and auditor shipped does not get them:
+add them on **Your team** (a plan that edits needs a `reviewer`) or copy their files from
+`default_personas`. The desktop app edits them on screen (**Your team**), and the lead agent may
 propose a new agent with a plan, made only when a person approves it.
 
 ## Documentation

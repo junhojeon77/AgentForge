@@ -79,12 +79,37 @@ async def test_five_default_workers_run_concurrently():
     running = asyncio.create_task(engine.run(plan(*(task(role, role=role) for role in roles))))
     await asyncio.wait_for(executor.started.wait(), 2)
     assert len(executor.assignments) == 5
-    assert all(worker.task_id is not None for worker in engine.snapshot().workers)
+    busy = [w for w in engine.snapshot().workers if w.agent.role in roles]
+    assert len(busy) == 5 and all(worker.task_id is not None for worker in busy)
     gate.set()
     report = await asyncio.wait_for(running, 2)
     assert report.successful
     assert len(report.attempts) == 5
     assert all(worker.task_id is None for worker in report.workers)
+
+
+class DiffByTask(MockExecutor):
+    def __init__(self, diffs):
+        super().__init__()
+        self.diffs = diffs
+
+    async def execute(self, assignment):
+        await super().execute(assignment)
+        return WorkerResult(success=True, diff=self.diffs.get(assignment.task.id, ""))
+
+
+async def test_a_task_is_given_the_diffs_of_the_tasks_it_waits_for(caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    executor = DiffByTask({"a": "+SECRET-DIFF-a"})
+    report = await scheduler(executor).run(
+        plan(task("a"), task("b"), task("c", dependencies=("a", "b")))
+    )
+    assert report.successful
+    given = {x.task.id: x.dependency_diffs for x in executor.assignments}
+    # b changed nothing, so only a's diff is handed on.
+    assert given == {"a": (), "b": (), "c": (("a", "+SECRET-DIFF-a"),)}
+    assert "run run task c gets the diffs of a" in caplog.messages
+    assert "SECRET-DIFF" not in caplog.text
 
 
 async def test_lower_cap_same_role_order_and_worker_selection():

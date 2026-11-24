@@ -373,6 +373,19 @@ class Scheduler:
                 )
                 self._attempts[task_id, number] = attempt
             previous_failure = self._attempts[task_id, number - 1].message if number > 1 else ""
+            # shortcut: diffs are passed whole; cap them if a real run nears the model's context.
+            diffs = tuple(
+                (dependency, diff)
+                for dependency in state.task.dependencies
+                if (diff := self._finished_diff(dependency))
+            )
+            if diffs:
+                logger.debug(
+                    "run %s task %s gets the diffs of %s",
+                    self._run_id,
+                    task_id,
+                    ", ".join(dependency for dependency, _ in diffs),
+                )
             limit = state.task.max_attempts
             verb = "resumed on" if resume else "assigned to"
             self._transition(
@@ -387,12 +400,20 @@ class Scheduler:
                 worker=worker.agent,
                 attempt_number=number,
                 previous_failure=previous_failure,
+                dependency_diffs=diffs,
                 session_id=attempt.session_id,
                 resume=resume,
             )
             self._active[task_id] = asyncio.create_task(
                 self._execute(assignment), name=f"agentforge:{self._run_id}:{task_id}"
             )
+
+    def _finished_diff(self, task_id: str) -> str:
+        """The diff of a completed task's last attempt; a task is dispatched only after them."""
+        state = self._states[task_id]
+        attempt = self._attempts.get((task_id, state.attempt_number))
+        result = attempt.result if attempt is not None else None
+        return result.diff if result is not None else ""
 
     async def _execute(self, assignment: Assignment) -> None:
         task_id, worker_id = assignment.task.id, assignment.worker.id

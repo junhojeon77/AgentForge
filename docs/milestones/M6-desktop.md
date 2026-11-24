@@ -23,6 +23,20 @@ screens, slice 5 the agent editor, slice 6 the visual design of the frame and th
 slice 7 the welcome screen, the view choice and the tour, and slice 8 the visual design of every
 screen slice 6 left plain.
 
+## Reviews and fix plans on screen (added on 2026-11-24)
+
+Built after slice 8, with the API's reviews and fix plans ([M5 doc](M5-api.md#reviews-and-fix-plans-added-on-2026-11-24)):
+
+- **Approve and start** says "After each task you let edit, the reviewer checks its change."
+  The `review-<id>` tasks then show on the run's page like any task, with the reviewer's report
+  under **Agent report**.
+- **Fixes from the reviews** (run page): on a finished run where a review found something that
+  must be fixed, **Plan fixes from the reviews** asks first ("It uses your Claude account, so it
+  is billed"), then asks the lead agent for a plan that fixes it. It can take minutes and gets a
+  new run name (`newRunId`). When it
+  is done the new plan opens, waiting for approval. A refusal shows under the button.
+- **The plan's page** says "Fixes the reviews of run X" when the plan came from one.
+
 ## Delivered behavior (slice 8)
 
 **The design's second pass.** Claude Design made the screens slice 6 had no design for. The copy
@@ -325,7 +339,7 @@ as HTML.
 check and every run start, instead of once at startup. A run that is active keeps the agents it
 started with, so its sessions and recovery are not disturbed.
 
-**The last agent cannot be removed.** An empty folder means "use the five defaults", so removing
+**The last agent cannot be removed.** An empty folder means "use the seven defaults", so removing
 the last agent would silently bring them back. Add the new agent first, then remove the old one.
 
 **A browser client may call the API only from the desktop app's origins:**
@@ -336,7 +350,7 @@ server). The token is still required on every real request.
 
 | Method and path | Does |
 |---|---|
-| `GET /agents` | `{"agents": [AgentConfig]}`: the agents the next run gets (the folder's, or the five defaults when it has none). Writes nothing |
+| `GET /agents` | `{"agents": [AgentConfig]}`: the agents the next run gets (the folder's, or the seven defaults when it has none). Writes nothing |
 | `PUT /agents/{id}` | Body: an `AgentConfig`. Adds or edits the agent's file; answers with the agent. 400 if the body's id differs from the path or the id breaks the rule; 422 if a field is invalid (a persona over 10,000 characters) |
 | `DELETE /agents/{id}` | Removes the agent's file. 404 if unknown; 400 for the last agent |
 | `GET /runs` | `{"active": id or null, "unfinished": [ids], "runs": [ids, newest first]}` |
@@ -366,7 +380,7 @@ one default in a new profile keeps the other four.
 | `agentforge.api` | DEBUG | `api: run <id> starts with agents <ids>` |
 | `agentforge.api` | DEBUG | A refused agent request or a broken persona file: the existing `<method> <path> answered <status>`; the detail, which can quote the file, is never logged |
 
-### The desktop app (slices 2 to 7)
+### The desktop app (slices 2 to 8)
 
 | Question | Where the answer is |
 |---|---|
@@ -392,6 +406,8 @@ one default in a new profile keeps the other four.
 | Why does the welcome screen show again? | The saved choices could not be read: the console has `guide: could not read the saved choices: <reason>` (`bad shape`, `no storage` or the error's name). Or someone pressed **Show the guide again** (`guide: shown again`) |
 | Why does the tour start when I open the app? | It was chosen but not finished (`tour=wanted` in the `guide: welcome passed` line); finish it or press **End tour** |
 | How do I see a first start again? | **Show the guide again**, or clear the window's local storage (right-click, Inspect, Application, Local storage) and reload |
+| Why is there no **Plan fixes from the reviews** button? | It shows only on a finished run with a finished review whose report holds "Must fix" (`hasReviews` in `runs.ts`, as `_reviews` in `api.py` decides). A review that found nothing gives the lead nothing to plan |
+| Why did planning the fixes fail? | The message under the button (the server's `detail`); the console has `POST /runs/<id>/fix-plan answered <status>` |
 | What did the app do, in order? | The webview's developer console (right-click, Inspect, in `tauri dev`): lines starting `agentforge.desktop:` |
 
 | Console level | Line |
@@ -436,7 +452,7 @@ run report; the console lines above are their record.
   while it plans loses the answer's display (the plan still appears under **Plans**).
 - **The project folder is remembered only while the app is open.**
 - **An agent cannot be renamed;** add one with the new name, then remove the old one.
-- **The five defaults cannot be restored from the app;** add them again by hand, or empty the
+- **The seven defaults cannot be restored from the app;** add them again by hand, or empty the
   agents folder yourself.
 - **A new agent the lead proposes cannot be dropped at approval, nor its role changed;** change
   how it works, or reject the plan and ask again.
@@ -451,7 +467,6 @@ run report; the console lines above are their record.
 - **The active run's report is read every 2 seconds** for the waiting-diffs count, on top of the
   reloads its live events cause.
 - **The theme follows Windows;** there is no light or dark switch in the app.
-- **A diff is drawn in full,** every line, however long.
 - **The token path is fixed** to the real `%APPDATA%`. A server started with a different
   `APPDATA` writes a token the app cannot see.
 - **The app is run with `tauri dev`;** no installer is built (M8).
@@ -465,7 +480,15 @@ run report; the console lines above are their record.
 ## Acceptance checks
 
 Run the pytest and Ruff commands in the root README, plus `npm --prefix apps/desktop test` and
-`npm --prefix apps/desktop run build`. Slice 8's tests:
+`npm --prefix apps/desktop run build`. The tests for reviews and fix plans (2026-11-24):
+
+- `proposals.test.ts`: `planFixes` sends the run's `fix-plan` path, encoded, with the new name.
+- `runs.test.ts`: `hasReviews` is true for a finished review with "Must fix" findings, and false
+  while it runs, for an empty report, for a review that found nothing to fix and for another
+  role.
+
+The button (with its billing question) and the plan page's line have no tests of their own (that would need a DOM library);
+`tsc` covers them. Slice 8's tests:
 
 - `proposals.test.ts`: the rights summary (none while no task may change files; tasks, checks and
   billed attempts counted; the singular for one); a draft's title counted from 1, by the rule

@@ -323,6 +323,7 @@ export function App() {
                     view.id !== connected.active && connected.unfinished.includes(view.id)
                   }
                   otherRun={connected.active !== view.id ? connected.active : null}
+                  onOpenPlan={(id) => show({ kind: "proposal", id })}
                 />
               ) : view.kind === "agents" ? (
                 <AgentsPage client={client} />

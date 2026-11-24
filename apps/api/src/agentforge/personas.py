@@ -1,7 +1,7 @@
 """Agent personas: one editable Markdown file per agent.
 
 File format: a `---` line, `key: value` settings (id, role, model, reasoning), a `---` line,
-then the persona text. Setup copies the five shipped defaults into an empty folder.
+then the persona text. Setup copies the seven shipped defaults into an empty folder.
 """
 
 import os

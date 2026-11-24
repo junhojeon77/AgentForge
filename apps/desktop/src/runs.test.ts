@@ -5,6 +5,7 @@ import {
   diffLines,
   diffStats,
   failureLabel,
+  hasReviews,
   retriesLeft,
   reviewAttempt,
   runSummary,
@@ -302,5 +303,54 @@ describe("attemptStartsOpen", () => {
     ["PAUSED", 1, false],
   ] as const)("with the task %s, attempt %i starts open: %s", (status, number, open) => {
     expect(attemptStartsOpen(number, task(status))).toBe(open);
+  });
+});
+
+describe("hasReviews", () => {
+  // Mirrors _reviews in api.py: the fix plan needs a finished review that says something.
+  const review = (status: TaskStatus, message: string, role = "reviewer") => ({
+    run_id: "r1",
+    transitions: [],
+    tasks: [
+      {
+        task: {
+          id: "review-a",
+          title: "review-a",
+          role,
+          dependencies: ["a"],
+          max_attempts: 1,
+          allowed_operations: [],
+          execution_constraints: [],
+        },
+        status,
+        failure_reason: null,
+        message: "",
+        attempt_number: 1,
+      },
+    ],
+    attempts: [
+      {
+        task_id: "review-a",
+        worker_id: "reviewer",
+        number: 1,
+        status,
+        failure_reason: null,
+        message: "",
+        result: { message, diff: "" },
+      },
+    ],
+  });
+
+  it("is true for a finished review with a report", () => {
+    expect(hasReviews(review("COMPLETED", "Must fix: 1."))).toBe(true);
+  });
+
+  it.each([
+    ["a review still running", review("RUNNING", "Must fix: 1.")],
+    ["an empty report", review("COMPLETED", "  ")],
+    ["a review that found nothing to fix", review("COMPLETED", "Looks good. Ship.")],
+    ["another role", review("COMPLETED", "Must fix: 1.", "qa")],
+  ])("is false for %s", (_name, run) => {
+    expect(hasReviews(run)).toBe(false);
   });
 });

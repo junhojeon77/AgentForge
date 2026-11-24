@@ -111,6 +111,21 @@ export function retriesLeft(attempt: number): string {
   return `${plural(left, "more attempt", "more attempts")} allowed (${MAX_ATTEMPTS} at most)`;
 }
 
+/** Whether a finished review found something that must be fixed: as `_reviews` in api.py. */
+export function hasReviews(run: RunReport): boolean {
+  return run.tasks.some(
+    (state) =>
+      state.task.role === "reviewer" &&
+      state.status === "COMPLETED" &&
+      run.attempts.some(
+        (a) =>
+          a.task_id === state.task.id &&
+          a.number === state.attempt_number &&
+          !!a.result?.message.toLowerCase().includes("must fix"),
+      ),
+  );
+}
+
 /** The run header's summary, e.g. "5 tasks · 1 completed · 2 waiting for you". */
 export function runSummary(tasks: { status: TaskStatus }[]): string {
   const parts = [plural(tasks.length, "task", "tasks")];

@@ -4,6 +4,7 @@ import { ApiError, type Client } from "./api/client";
 import { followEvents, type Transition } from "./api/events";
 import { Icon } from "./Icon";
 import { log } from "./log";
+import { newRunId, planFixes } from "./proposals";
 import {
   attemptStartsOpen,
   type DiffTone,
@@ -11,6 +12,7 @@ import {
   diffStats,
   failureLabel,
   type Group,
+  hasReviews,
   type RunAction,
   type RunReport,
   retriesLeft,
@@ -142,6 +144,7 @@ export function RunPage({
   live,
   interrupted,
   otherRun,
+  onOpenPlan,
 }: {
   client: Client;
   runId: string;
@@ -149,6 +152,7 @@ export function RunPage({
   interrupted: boolean;
   /** Another run that is active; this one cannot be reopened until it ends. */
   otherRun: string | null;
+  onOpenPlan: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
   const report = useQuery(runQuery(client, runId));
@@ -213,8 +217,61 @@ export function RunPage({
               ))}
             </ul>
           </section>
+          {state === "Finished" && hasReviews(run) && (
+            <FixPlan client={client} runId={runId} onOpenPlan={onOpenPlan} />
+          )}
           <History transitions={run.transitions} tasks={run.tasks.map((t) => t.task.id)} />
         </>
+      )}
+    </section>
+  );
+}
+
+/** The lead agent plans fixes from this run's reviews; the plan waits for approval like any. */
+function FixPlan({
+  client,
+  runId,
+  onOpenPlan,
+}: {
+  client: Client;
+  runId: string;
+  onOpenPlan: (id: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const plan = useMutation({
+    mutationFn: () => planFixes(client, runId, { run_id: newRunId(new Date()) }),
+    onSuccess: async (proposal) => {
+      await queryClient.invalidateQueries({ queryKey: ["proposals"] });
+      onOpenPlan(proposal.id);
+    },
+  });
+  return (
+    <section aria-labelledby="fixes-title" className="max-w-form space-y-3">
+      <h2 id="fixes-title" className="text-section font-semibold">
+        Fixes from the reviews
+      </h2>
+      <p className="text-ink-muted">
+        The lead agent reads what the reviewer found and plans fixes for what must be fixed. You
+        look the plan over and approve it before any work starts. Planning can take a few minutes.
+      </p>
+      <Confirm
+        label="Plan fixes from the reviews"
+        name={`Plan fixes from the reviews of run ${runId}`}
+        icon="retry"
+        question="Plan fixes with the lead agent? It uses your Claude account, so it is billed."
+        yes="Yes, plan the fixes"
+        keep="Not now"
+        destructive={false}
+        disabled={plan.isPending}
+        busy={plan.isPending}
+        onConfirm={() => plan.mutate()}
+      />
+      {plan.error && (
+        <Alert
+          title="Could not plan the fixes:"
+          text={problem(plan.error)}
+          onDismiss={() => plan.reset()}
+        />
       )}
     </section>
   );

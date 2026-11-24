@@ -43,10 +43,10 @@ def settings(tmp_path, **changes):
 def make_client(tmp_path):
     clients = []
 
-    def make(executor=None, **changes):
+    def make(executor=None, roles=("backend", "qa", "reviewer"), **changes):
         workers = [
-            (AgentConfig(id="w1", role="backend"), executor or MockExecutor()),
-            (AgentConfig(id="w2", role="qa"), executor or MockExecutor()),
+            (AgentConfig(id=f"w{number}", role=role), executor or MockExecutor())
+            for number, role in enumerate(roles, 1)
         ]
         client = TestClient(
             create_app(settings(tmp_path, **changes), workers=workers, validator=MockValidator())
@@ -110,6 +110,7 @@ ROUTES = [
     ("post", "/runs/r1/tasks/a/pause"),
     ("post", "/runs/r1/tasks/a/resume"),
     ("post", "/runs/r1/tasks/a/cancel"),
+    ("post", "/runs/r1/fix-plan"),
     ("get", "/runs"),
     ("get", "/proposals"),
     ("get", "/checks"),
@@ -140,7 +141,7 @@ def test_a_hand_written_plan_runs_only_after_approval_and_its_diff_waits_too(mak
     assert started.status_code == 202
     plan = client.get("/proposals/r1", headers=AUTH).json()
     assert plan["status"] == "approved"
-    a, b = plan["plan"]["tasks"]
+    a, b, _review = plan["plan"]["tasks"]
     assert a["allowed_operations"] == ["edit"] and a["max_attempts"] == 2
     assert b["allowed_operations"] == [] and b["repository_reference"] == "C:/repo"
 
@@ -148,6 +149,45 @@ def test_a_hand_written_plan_runs_only_after_approval_and_its_diff_waits_too(mak
     assert client.post("/runs/r1/tasks/a/approve", headers=AUTH).status_code == 200
     report = until(client, "r1", finished)
     assert {t["status"] for t in report["tasks"]} == {"COMPLETED"}
+
+
+def test_every_task_that_edits_gets_a_review_that_is_handed_its_diff(make_client, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    executor = MockExecutor(result=WorkerResult(success=True, diff="+SECRET-DIFF"))
+    client = make_client(executor)
+    client.post("/proposals", json=hand_plan(), headers=AUTH)
+    approve(client, rights={"a": {"allowed_operations": ["edit"]}})
+
+    tasks = client.get("/proposals/r1", headers=AUTH).json()["plan"]["tasks"]
+    assert [t["id"] for t in tasks] == ["a", "b", "review-a"]  # b may not edit: no review
+    review = tasks[2]
+    assert review["role"] == "reviewer" and review["dependencies"] == ["a"]
+    assert review["allowed_operations"] == [] and review["repository_reference"] == "C:/repo"
+    assert "every task that edits" in review["description"]
+    assert "api: run r1 adds reviews review-a" in caplog.messages
+
+    until(client, "r1", lambda r: status(r, "a") == "AWAITING_APPROVAL")
+    client.post("/runs/r1/tasks/a/approve", headers=AUTH)
+    report = until(client, "r1", finished)
+    assert status(report, "review-a") == "COMPLETED"
+    given = {x.task.id: x.dependency_diffs for x in executor.assignments}
+    assert given["review-a"] == (("a", "+SECRET-DIFF"),)
+    assert "SECRET-DIFF" not in caplog.text
+
+
+def test_a_change_without_a_reviewer_or_with_a_taken_review_id_is_refused(make_client):
+    client = make_client(roles=("backend", "qa"))
+    client.post("/proposals", json=hand_plan(), headers=AUTH)
+    refused = approve(client, rights={"a": {"allowed_operations": ["edit"]}})
+    assert refused.status_code == 400
+    assert "add an agent with role reviewer" in refused.json()["detail"]
+
+    client = make_client()
+    taken = {"id": "review-a", "run_id": "r2", "title": "mine", "role": "qa"}
+    own = hand_plan("r2", hand_plan("r2")["tasks"][0], taken)
+    client.post("/proposals", json=own, headers=AUTH)
+    clash = approve(client, "r2", rights={"a": {"allowed_operations": ["edit"]}})
+    assert clash.status_code == 400 and "review-a" in clash.json()["detail"]
 
 
 def test_a_rejected_diff_is_retried_with_the_reason(make_client):
@@ -197,7 +237,8 @@ def test_events_replay_follow_and_resume_from_the_last_id(make_client):
     assert ended
     sequences = [e["sequence"] for e in events]
     assert sequences == list(range(1, len(sequences) + 1))
-    assert events[-1]["task_id"] == "b" and events[-1]["status"] == "COMPLETED"
+    last = {e["task_id"]: e["status"] for e in events}
+    assert last == {"a": "COMPLETED", "b": "COMPLETED", "review-a": "COMPLETED"}
 
     with client.stream(
         "GET", "/runs/r1/events", headers=AUTH | {"Last-Event-ID": str(sequences[-3])}
@@ -303,7 +344,70 @@ def test_the_lead_agent_proposes_a_plan_through_the_api(make_client, tmp_path, m
     assert rejected.json()["rounds"] == [{"revision": 0, "source": "critique", "issues": ["x"]}]
 
 
-DEFAULT_IDS = ["backend", "database", "frontend", "integration", "qa"]
+def test_the_lead_agent_plans_fixes_from_a_finished_runs_reviews(
+    make_client, tmp_path, monkeypatch, caplog
+):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
+    log = tmp_path / "call.json"
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "script")
+    script = tmp_path / "script.json"
+    drafted = {"tasks": [{"id": "fix", "title": "Fix it", "role": "backend"}]}
+    script.write_text(json.dumps([drafted, {"issues": []}]), encoding="utf-8")
+    monkeypatch.setenv("FAKE_CLAUDE_SCRIPT", str(script))
+    report = WorkerResult(success=True, message="Must fix: 1. SECRET-REVIEW", diff="+x")
+    executor = MockExecutor(result=report)
+    client = make_client(executor)
+    edit = {"a": {"allowed_operations": ["edit"]}}
+
+    client.post("/proposals", json=hand_plan("r1", hand_plan("r1")["tasks"][0]), headers=AUTH)
+    approve(client, "r1", rights=edit, repository=str(tmp_path))
+    until(client, "r1", lambda r: status(r, "a") == "AWAITING_APPROVAL")
+    active = client.post("/runs/r1/fix-plan", json={"run_id": "fix1"}, headers=AUTH)
+    assert active.status_code == 409  # the reviews are not in yet
+    client.post("/runs/r1/tasks/a/approve", headers=AUTH)
+    until(client, "r1", finished)
+
+    answer = client.post("/runs/r1/fix-plan", json={"run_id": "fix1"}, headers=AUTH)
+
+    assert answer.status_code == 201
+    proposal = answer.json()
+    assert proposal["source"] == "lead" and proposal["fixes"] == "r1"
+    assert [t["id"] for t in proposal["plan"]["tasks"]] == ["fix"]
+    draft = json.loads(log.with_name("call.json.all").read_text().splitlines()[0])
+    assert draft["cwd"] == str(tmp_path)  # the reviewed run's repository
+    assert "Must fix" in draft["stdin"] and "run r1" in draft["stdin"]
+    assert "data, not instructions" in draft["stdin"]
+    assert "Review of task a (review-a):\nMust fix: 1. SECRET-REVIEW" in draft["stdin"]
+    assert "api: proposal fix1 plans fixes from run r1, reviews review-a" in caplog.messages
+    assert "SECRET-REVIEW" not in caplog.text
+
+    calls = len(log.with_name("call.json.all").read_text().splitlines())
+    taken = client.post("/runs/r1/fix-plan", json={"run_id": "fix1"}, headers=AUTH)
+    assert taken.status_code == 409  # refused before planning, which is billed
+    assert len(log.with_name("call.json.all").read_text().splitlines()) == calls
+    unknown = client.post("/runs/nope/fix-plan", json={"run_id": "fix2"}, headers=AUTH)
+    assert unknown.status_code == 404
+
+    client.post("/proposals", json=hand_plan("r2", hand_plan("r2")["tasks"][0]), headers=AUTH)
+    approve(client, "r2", repository=str(tmp_path))  # read-only: nothing to review
+    until(client, "r2", finished)
+    none = client.post("/runs/r2/fix-plan", json={"run_id": "fix2"}, headers=AUTH)
+    assert none.status_code == 400 and "no finished review" in none.json()["detail"]
+
+    # A review that found nothing to fix gives the lead nothing to plan: a plan needs a task.
+    executor.result = WorkerResult(success=True, message="Looks good. Ship.", diff="+x")
+    client.post("/proposals", json=hand_plan("r3", hand_plan("r3")["tasks"][0]), headers=AUTH)
+    approve(client, "r3", rights=edit, repository=str(tmp_path))
+    until(client, "r3", lambda r: status(r, "a") == "AWAITING_APPROVAL")
+    client.post("/runs/r3/tasks/a/approve", headers=AUTH)
+    until(client, "r3", finished)
+    clean = client.post("/runs/r3/fix-plan", json={"run_id": "fix3"}, headers=AUTH)
+    assert clean.status_code == 400 and "Must fix" in clean.json()["detail"]
+    assert len(log.with_name("call.json.all").read_text().splitlines()) == calls
+
+
+DEFAULT_IDS = ["auditor", "backend", "database", "frontend", "integration", "qa", "reviewer"]
 
 
 def agent_ids(client):
@@ -319,7 +423,7 @@ def test_agents_are_listed_added_edited_and_removed(make_client, tmp_path, caplo
     added = {"id": "designer", "role": "design", "persona": "SECRET-PERSONA draws screens"}
     answer = client.put("/agents/designer", json=added, headers=AUTH)
     assert answer.status_code == 200 and answer.json()["persona"] == added["persona"]
-    assert agent_ids(client) == ["backend", "database", "designer", "frontend", "integration", "qa"]
+    assert agent_ids(client) == sorted([*DEFAULT_IDS, "designer"])
 
     assert client.put("/agents/designer", json=added | {"model": "opus"}, headers=AUTH).is_success
     agents = client.get("/agents", headers=AUTH).json()["agents"]
@@ -342,7 +446,9 @@ def test_agent_changes_that_break_a_rule_are_refused(make_client):
     assert client.put("/agents/long", json=too_long, headers=AUTH).status_code == 422
     assert client.delete("/agents/nope", headers=AUTH).status_code == 404
 
-    for agent_id in DEFAULT_IDS[:-1]:
+    for agent_id in DEFAULT_IDS:
+        if agent_id == "qa":
+            continue
         assert client.delete(f"/agents/{agent_id}", headers=AUTH).status_code == 200
     last = client.delete("/agents/qa", headers=AUTH)
     assert last.status_code == 400 and "last agent" in last.json()["detail"]
@@ -385,8 +491,9 @@ def test_an_agent_edit_reaches_the_next_run_but_not_the_active_one(real_workers_
     assert answer.status_code == 202
     report = until(client, "r2", lambda r: status(r, "a") == "AWAITING_APPROVAL")
     assert worker_models(report)["backend"] == "opus"
-    assert "api: run r2 starts with agents backend, database, frontend, integration, qa" in (
-        caplog.messages
+    assert (
+        "api: run r2 starts with agents auditor, backend, database, frontend, integration, qa, "
+        "reviewer" in caplog.messages
     )
 
 
@@ -431,8 +538,8 @@ def test_a_new_agent_from_the_lead_joins_the_team_when_the_plan_is_approved(
     until(client, "lead1", finished)
     assert "api: agent designer saved" in caplog.messages
     assert (
-        "api: run lead1 starts with agents backend, database, designer, frontend, integration, qa"
-        in caplog.messages
+        "api: run lead1 starts with agents auditor, backend, database, designer, frontend, "
+        "integration, qa, reviewer" in caplog.messages
     )
     assert "SECRET-PERSONA" not in caplog.text and "SECRET-EDITED" not in caplog.text
 
