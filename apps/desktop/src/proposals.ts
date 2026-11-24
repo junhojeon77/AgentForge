@@ -1,5 +1,6 @@
 import type { Agent } from "./agents";
 import { ApiError, type Client, jsonBody } from "./api/client";
+import { plural } from "./ui";
 
 // The parts of the server's Proposal (domain.py) that the proposal page shows.
 export interface PlanTask {
@@ -71,6 +72,38 @@ export function approvalBody(
     return [task, body] as const;
   });
   return { repository, rights: Object.fromEntries(granted), agents };
+}
+
+/** What the approve form will grant, in words; null while no task may change files. */
+export function rightsSummary(rights: Record<string, Rights>): string | null {
+  const all = Object.values(rights);
+  const editing = all.filter((r) => r.edit).length;
+  if (editing === 0) return null;
+  const checks = all.reduce((sum, r) => sum + r.checks.length, 0);
+  const attempts = all.reduce((sum, r) => sum + r.maxAttempts, 0);
+  return (
+    `${editing} of ${plural(all.length, "task", "tasks")} may change files · ` +
+    `${plural(checks, "check runs", "checks run")} before work is accepted · ` +
+    `up to ${plural(attempts, "billed attempt", "billed attempts")}.`
+  );
+}
+
+/** A round's heading; drafts count from 1 for people, while the server's first is revision 0. */
+export function draftTitle(round: PlanRound): string {
+  const by = round.source === "check" ? "the rule check" : "the lead agent's review";
+  return `Draft ${round.revision + 1}, found by ${by}:`;
+}
+
+export function fixesHint(rounds: PlanRound[]): string {
+  const issues = rounds.reduce((sum, r) => sum + r.issues.length, 0);
+  return `${plural(rounds.length, "draft", "drafts")}, ${plural(issues, "issue", "issues")} fixed`;
+}
+
+export function planningSince(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  return minutes < 1
+    ? "Started less than a minute ago."
+    : `Started ${plural(minutes, "minute", "minutes")} ago.`;
 }
 
 /** A hand-written plan; the server checks it against the rules. */

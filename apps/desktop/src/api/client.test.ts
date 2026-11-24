@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createClient } from "./client";
+import { ApiError, createClient, fieldErrors } from "./client";
 
 const SECRET = "tok-secret-123";
 
@@ -151,5 +151,27 @@ describe("request", () => {
     await client.request("/runs").catch(() => {});
 
     expect(logged()).not.toContain(SECRET);
+  });
+});
+
+describe("fieldErrors", () => {
+  it("reads each field error of a 422, with the server's words", async () => {
+    const detail = [
+      { loc: ["body", "persona"], msg: "String should have at most 10000 characters" },
+      { loc: ["body", "model"], msg: "String should match pattern" },
+    ];
+    const { client } = setup([json(422, { detail })], [SECRET]);
+    const error = await client.request("/agents/qa", { method: "PUT" }).catch((e) => e);
+    expect(fieldErrors(error)).toEqual([
+      { loc: ["body", "persona"], msg: "String should have at most 10000 characters" },
+      { loc: ["body", "model"], msg: "String should match pattern" },
+    ]);
+  });
+
+  it("has none for a refusal in words, a lost server or another error", () => {
+    expect(fieldErrors(new ApiError("http", 400, "the last agent", { detail: "the last agent" })))
+      .toEqual([]);
+    expect(fieldErrors(new ApiError("offline"))).toEqual([]);
+    expect(fieldErrors(new Error("not valid JSON"))).toEqual([]);
   });
 });

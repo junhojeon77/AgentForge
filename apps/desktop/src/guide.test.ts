@@ -10,6 +10,7 @@ import {
   setView,
   showAgain,
 } from "./guide";
+import { placeCard } from "./GuideScreens";
 
 const SECRET = "SECRET-SAVED-TEXT";
 
@@ -167,5 +168,67 @@ describe("the guide's steps", () => {
 
     expect(showAgain(guide)).toEqual({ view: "technical", welcomed: false, tour: null });
     expect(logged()).toContain("guide: shown again");
+  });
+});
+
+describe("placeCard", () => {
+  const card = { width: 340, height: 170 };
+  const wide = { width: 1000, height: 700 };
+  const teamItem = { top: 60, left: 8, width: 232, height: 32 };
+
+  it("sits right of a side-list item with its notch at the item's middle", () => {
+    expect(placeCard(teamItem, card, wide, "right")).toEqual({
+      side: "right",
+      top: 48,
+      left: 248,
+      notch: 22,
+    });
+  });
+
+  it("goes below the item when the window has no room on either side", () => {
+    expect(placeCard(teamItem, card, { width: 500, height: 700 }, "right")).toEqual({
+      side: "below",
+      top: 100,
+      left: 20,
+      notch: 22,
+    });
+  });
+
+  it("sits below the full-width status bar, pointing near its words", () => {
+    const bar = { top: 0, left: 0, width: 1000, height: 36 };
+    expect(placeCard(bar, card, wide, "below")).toEqual({
+      side: "below",
+      top: 44,
+      left: 12,
+      notch: 22,
+    });
+  });
+
+  it("sits above the side-list footer, or below it when there is no room above", () => {
+    const footer = { top: 620, left: 0, width: 248, height: 72 };
+    expect(placeCard(footer, { width: 340, height: 150 }, wide, "above")).toEqual({
+      side: "above",
+      top: 462,
+      left: 12,
+      notch: 22,
+    });
+    const high = { top: 10, left: 0, width: 248, height: 40 };
+    expect(placeCard(high, { width: 340, height: 150 }, wide, "above").side).toBe("below");
+  });
+
+  it("stays inside a window too small for any side", () => {
+    const footer = { top: 120, left: 0, width: 248, height: 72 };
+    const placed = placeCard(footer, { width: 340, height: 150 }, { width: 360, height: 200 }, "above");
+    expect(placed.top).toBeGreaterThanOrEqual(8);
+    expect(placed.top + 150).toBeLessThanOrEqual(200 - 8);
+    expect(placed.left).toBeGreaterThanOrEqual(8);
+  });
+
+  it("keeps the notch within the card", () => {
+    const low = { top: 680, left: 8, width: 232, height: 20 };
+    const placed = placeCard(low, card, wide, "right");
+    expect(placed.side).toBe("right");
+    expect(placed.notch).toBeLessThanOrEqual(card.height - 24);
+    expect(placed.notch).toBeGreaterThanOrEqual(12);
   });
 });

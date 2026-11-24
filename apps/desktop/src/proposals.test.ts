@@ -3,14 +3,18 @@ import { ApiError } from "./api/client";
 import {
   approvalBody,
   approveProposal,
+  draftTitle,
+  fixesHint,
   NO_RIGHTS,
   newRunId,
   parsePlan,
+  planningSince,
   planRequest,
   planTemplate,
   proposalPath,
   proposePlan,
   rejectProposal,
+  rightsSummary,
   roundsOf,
 } from "./proposals";
 
@@ -168,5 +172,69 @@ describe("roundsOf", () => {
     new Error("x"),
   ])("finds none in another failure", (error) => {
     expect(roundsOf(error)).toEqual([]);
+  });
+});
+
+describe("rightsSummary", () => {
+  const rights = (edit: boolean, checks: string[] = [], maxAttempts = 1) => ({
+    ...NO_RIGHTS,
+    edit,
+    checks,
+    maxAttempts,
+  });
+
+  it("is null while no task may change files, so the page warns instead", () => {
+    expect(rightsSummary({ a: rights(false, ["unit"]), b: rights(false) })).toBeNull();
+  });
+
+  it("counts the tasks that may change files, the checks and the billed attempts", () => {
+    const all = {
+      schema: rights(true, ["unit", "lint"]),
+      api: rights(true, ["unit", "lint", "types"]),
+      ui: rights(true, ["lint"], 1),
+      tests: rights(false, [], 1),
+    };
+    expect(rightsSummary(all)).toBe(
+      "3 of 4 tasks may change files · 6 checks run before work is accepted · up to 4 billed attempts.",
+    );
+  });
+
+  it("speaks of one task, one check and one attempt in the singular", () => {
+    expect(rightsSummary({ api: rights(true, ["unit"]) })).toBe(
+      "1 of 1 task may change files · 1 check runs before work is accepted · up to 1 billed attempt.",
+    );
+  });
+});
+
+describe("draftTitle and fixesHint", () => {
+  it("counts drafts from 1, since the server's revision 0 is the first draft", () => {
+    expect(draftTitle({ revision: 0, source: "check", issues: [] })).toBe(
+      "Draft 1, found by the rule check:",
+    );
+    expect(draftTitle({ revision: 1, source: "critique", issues: [] })).toBe(
+      "Draft 2, found by the lead agent's review:",
+    );
+  });
+
+  it("names how many drafts and issues the lead agent fixed", () => {
+    expect(
+      fixesHint([
+        { revision: 0, source: "check", issues: ["a"] },
+        { revision: 1, source: "critique", issues: ["b", "c"] },
+      ]),
+    ).toBe("2 drafts, 3 issues fixed");
+    expect(fixesHint([{ revision: 0, source: "check", issues: ["a"] }])).toBe(
+      "1 draft, 1 issue fixed",
+    );
+  });
+});
+
+describe("planningSince", () => {
+  it("says how long ago planning started, in whole minutes", () => {
+    expect(planningSince(0)).toBe("Started less than a minute ago.");
+    expect(planningSince(59_999)).toBe("Started less than a minute ago.");
+    expect(planningSince(60_000)).toBe("Started 1 minute ago.");
+    expect(planningSince(119_999)).toBe("Started 1 minute ago.");
+    expect(planningSince(12 * 60_000 + 5_000)).toBe("Started 12 minutes ago.");
   });
 });

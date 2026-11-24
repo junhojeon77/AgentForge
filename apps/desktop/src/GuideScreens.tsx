@@ -9,112 +9,202 @@ const VIEWS: { view: View; label: string; means: string }[] = [
   { view: "technical", label: "Technical", means: "Technical options start open." },
 ];
 
-/** The first screen: how AgentForge works, the view choice, then whether to take the tour. */
+const HOW = [
+  "You ask for something in your own words.",
+  "The lead agent turns it into a plan; you look it over and approve it.",
+  "Your team builds it, each task in its own copy of your project.",
+  "You review each change and approve or reject it.",
+];
+
+/** The first screen: how AgentForge works, the view choice, then whether to take the tour. The
+ * view is saved as soon as it is chosen. */
 export function Welcome({
   view,
+  onView,
   onDone,
 }: {
   view: View;
-  onDone: (view: View, takeTour: boolean) => void;
+  onView: (view: View) => void;
+  onDone: (takeTour: boolean) => void;
 }) {
-  const [picked, setPicked] = useState(view);
   const name = useId();
   return (
-    <main className="flex-1 overflow-y-auto p-8">
-      <div className="max-w-[560px] space-y-5">
-        <h1 className="font-display text-[18px] leading-6 font-semibold">Welcome to AgentForge</h1>
-        <p className="text-ink-muted">
-          Ask for something in plain words and a team of AI agents builds it on this computer.
-          Nothing starts and no change is accepted without your OK.
-        </p>
-        <section aria-labelledby={`${name}-how`} className="space-y-2">
-          <h2 id={`${name}-how`} className="text-section font-semibold">
-            How it works
-          </h2>
-          <ol className="list-decimal space-y-1 pl-5">
-            <li>You ask for something in your own words.</li>
-            <li>The lead agent turns it into a plan; you look it over and approve it.</li>
-            <li>Your team builds it, each task in its own copy of your project.</li>
-            <li>You review each change and approve or reject it.</li>
-          </ol>
-        </section>
-        <fieldset className="space-y-2">
-          <legend className="text-section font-semibold">How should the app look?</legend>
-          {VIEWS.map((v) => (
-            <label key={v.view} className="flex items-start gap-2">
-              <input
-                type="radio"
-                name={name}
-                checked={picked === v.view}
-                onChange={() => setPicked(v.view)}
-                className="mt-1"
-              />
-              <span>
-                <span className="font-semibold">{v.label}</span>{" "}
-                <span className="text-ink-muted">{v.means}</span>
-              </span>
-            </label>
-          ))}
-          <p className="text-meta text-ink-muted">
-            You can change this later at the bottom of the side list.
+    <main className="min-h-0 flex-1 overflow-y-auto">
+      <div className="grid min-h-full grid-cols-[minmax(0,1fr)_minmax(0,380px)] content-center gap-x-14 gap-y-8 px-16 py-14 max-[720px]:grid-cols-1 max-[720px]:px-6 max-[720px]:py-8">
+        <div>
+          <p className="mb-6 font-display font-semibold text-ink-muted">AgentForge</p>
+          <h1 className="font-display text-welcome font-semibold">Welcome to AgentForge</h1>
+          <p className="mt-3 mb-8 max-w-[52ch] text-[15px] leading-[22px]">
+            Ask for something in plain words and a team of AI agents builds it on this computer.
+            Nothing starts and no change is accepted without your OK.
           </p>
-        </fieldset>
-        <p>Want a short tour? It points at each part of the window in turn.</p>
-        <div className="flex flex-wrap gap-2">
-          <Button kind="primary" onClick={() => onDone(picked, true)}>
-            Take the tour
-          </Button>
-          <Button onClick={() => onDone(picked, false)}>Skip the tour</Button>
+          <section aria-labelledby={`${name}-how`}>
+            <h2 id={`${name}-how`} className="mb-3 text-section font-semibold">
+              How it works
+            </h2>
+            <ol className="flex flex-col gap-3">
+              {HOW.map((step, i) => (
+                <li key={step} className="grid grid-cols-[24px_minmax(0,1fr)] gap-2">
+                  <span aria-hidden="true" className="font-semibold text-accent tabular-nums">
+                    {i + 1}
+                  </span>
+                  {step}
+                </li>
+              ))}
+            </ol>
+          </section>
+        </div>
+        {/* Top-aligned with the first step on a wide window. */}
+        <div className="flex flex-col gap-6 pt-[60px] max-[720px]:pt-0">
+          <fieldset className="flex min-w-0 flex-col gap-2">
+            <legend className="mb-2 text-section font-semibold">How should the app look?</legend>
+            {VIEWS.map((v) => (
+              <label
+                key={v.view}
+                className="group grid cursor-pointer grid-cols-[18px_minmax(0,1fr)] gap-x-2 gap-y-0.5 rounded-md border border-line-strong bg-surface px-3 py-2 has-checked:border-accent has-checked:bg-selected has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus"
+              >
+                <input
+                  type="radio"
+                  name={name}
+                  checked={view === v.view}
+                  onChange={() => onView(v.view)}
+                  // The row shows the focus ring instead.
+                  className="mt-0.5 size-4 focus-visible:outline-none"
+                />
+                <span className="font-semibold">{v.label}</span>
+                <span className="col-start-2 text-[13px] leading-[18px] text-ink-muted group-has-checked:text-ink">
+                  {v.means}
+                </span>
+              </label>
+            ))}
+            <p className="text-meta text-ink-muted">
+              You can change this later at the bottom of the side list.
+            </p>
+          </fieldset>
+          <div className="flex flex-col gap-3">
+            <p>Want a short tour? It points at each part of the window in turn.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button kind="primary" autoFocus onClick={() => onDone(true)}>
+                Take the tour
+              </Button>
+              <Button kind="ghost" onClick={() => onDone(false)}>
+                Skip the tour
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </main>
   );
 }
 
-// `target` matches a `data-tour` attribute in App; `place` picks the card's side in index.css.
-const STEPS = [
+export type Side = "right" | "left" | "below" | "above";
+type Box = { top: number; left: number; width: number; height: number };
+type Size = { width: number; height: number };
+
+const GAP = 8; // between the card and its target
+const EDGE = 8; // kept free at the window's edges
+// The side tried first, then the ones tried after it when the window has no room.
+const TRIES: Record<Side, Side[]> = {
+  right: ["right", "left", "below", "above"],
+  left: ["left", "right", "below", "above"],
+  below: ["below", "above"],
+  above: ["above", "below"],
+};
+const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high));
+
+/** Where the tour card goes beside its target, and where along its edge the notch points. Measured
+ * rather than left to CSS, because the notch must know which side the card ended up on. */
+export function placeCard(target: Box, card: Size, view: Size, prefer: Side) {
+  const bottom = target.top + target.height;
+  const right = target.left + target.width;
+  const fits: Record<Side, boolean> = {
+    right: right + GAP + card.width <= view.width - EDGE,
+    left: target.left - GAP - card.width >= EDGE,
+    below: bottom + GAP + card.height <= view.height - EDGE,
+    above: target.top - GAP - card.height >= EDGE,
+  };
+  const side = TRIES[prefer].find((s) => fits[s]) ?? prefer;
+  const maxTop = view.height - card.height - EDGE;
+  const maxLeft = view.width - card.width - EDGE;
+  if (side === "right" || side === "left") {
+    const middle = target.top + target.height / 2;
+    const top = clamp(middle - 28, EDGE, maxTop);
+    const left = side === "right" ? right + GAP : target.left - GAP - card.width;
+    return {
+      side,
+      top,
+      left: clamp(left, EDGE, maxLeft),
+      notch: clamp(middle - top - 6, 12, card.height - 24),
+    };
+  }
+  const top = side === "below" ? bottom + GAP : target.top - GAP - card.height;
+  const left = clamp(target.left + 12, EDGE, maxLeft);
+  // Near the start of a wide target (the status bar's words), the middle of a narrow one.
+  const point = target.left + Math.min(40, target.width / 2);
+  return {
+    side,
+    top: clamp(top, EDGE, maxTop),
+    left,
+    notch: clamp(point - left - 6, 12, card.width - 24),
+  };
+}
+
+// `target` matches a `data-tour` attribute in App; `side` is where the card goes first.
+const STEPS: { target: string; side: Side; title: string; text: string }[] = [
   {
     target: "ask",
-    place: "right",
+    side: "right",
     title: "Ask for something",
-    text: "Start here: say what you want built, in plain words. The lead agent turns it into a plan.",
+    text: "Start here. Say what you want built in your own words; the lead agent turns it into a plan you approve before any work starts.",
   },
   {
     target: "plans",
-    place: "right",
+    side: "right",
     title: "Plans",
-    text: "Plans from the lead agent wait here for your OK. An amber count says how many are waiting.",
+    text: "Plans waiting for your OK show here, marked in amber. Open one to read its tasks and decide what each task may do.",
   },
   {
     target: "runs",
-    place: "right",
+    side: "right",
     title: "Runs",
-    text: "An approved plan becomes a run. Open one to watch the team work and review each change.",
+    text: "Each approved plan becomes a run. Follow its tasks as they work, and review every change before it is accepted.",
   },
   {
     target: "team",
-    place: "right",
+    side: "right",
     title: "Your team",
-    text: "The agents who do the work. Change how each one works, add one or remove one.",
+    text: "The agents that do the work. Change how each one should work, or add a new one.",
   },
   {
     target: "status",
-    place: "below",
-    title: "Connection",
-    text: "Says whether the app can reach the AgentForge server on this computer. Press Reconnect if it can't.",
+    side: "below",
+    title: "The status bar",
+    text: "Shows whether the app can reach the AgentForge server on this computer. If it can't, the steps to start it appear below.",
   },
   {
     target: "view",
-    place: "right-up",
-    title: "Plain or technical",
-    text: "Technical options sit under More options. Choose here whether they start open, or show this guide again.",
+    side: "above",
+    title: "View and guide",
+    text: "Switch between the Plain and Technical view here, or open this guide again.",
   },
-] as const;
+];
+
+// The notch is a square turned 45°; the two borders facing the target show.
+const NOTCH: Record<Side, string> = {
+  right: "-left-[7px] border-t-0 border-r-0",
+  left: "-right-[7px] border-b-0 border-l-0",
+  below: "-top-[7px] border-r-0 border-b-0",
+  above: "-bottom-[7px] border-t-0 border-l-0",
+};
+
+type Placed = ReturnType<typeof placeCard>;
 
 /** A card beside each part of the window in turn. The window waits while it is open; Esc or
  * End tour stops it. Every target is part of the connected frame, so App shows it only then. */
 export function Tour({ onEnd }: { onEnd: (finished: boolean) => void }) {
   const [index, setIndex] = useState(0);
+  const [placed, setPlaced] = useState<Placed | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const next = useRef<HTMLButtonElement>(null);
   const id = useId();
@@ -123,38 +213,67 @@ export function Tour({ onEnd }: { onEnd: (finished: boolean) => void }) {
 
   // Opened before the step's effect below, so Next takes the focus, not the first button.
   useLayoutEffect(() => {
+    const before = document.activeElement;
     if (dialog.current && !dialog.current.open) dialog.current.showModal();
+    return () => {
+      // Focus goes back where it was. Deferred: while the modal is still in the page,
+      // everything outside it is inert.
+      if (before instanceof HTMLElement) setTimeout(() => before.isConnected && before.focus());
+    };
   }, []);
 
-  // The ring and the anchor the card sits beside (index.css) follow the step.
+  // The highlight and the card's place follow the step, and the window's size.
   useLayoutEffect(() => {
     log.debug(`guide: tour step ${index + 1} of ${STEPS.length} (${step.target})`);
     const target = document.querySelector(`[data-tour="${step.target}"]`);
     target?.setAttribute("data-tour-current", "");
     next.current?.focus();
-    return () => target?.removeAttribute("data-tour-current");
-  }, [index, step.target]);
+    const place = () => {
+      const card = dialog.current?.getBoundingClientRect();
+      const view = { width: window.innerWidth, height: window.innerHeight };
+      setPlaced(target && card ? placeCard(target.getBoundingClientRect(), card, view, step.side) : null);
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      target?.removeAttribute("data-tour-current");
+    };
+  }, [index, step]);
 
   return (
     <dialog
       ref={dialog}
       aria-labelledby={`${id}-title`}
-      data-place={step.place}
       // Esc closes the dialog, and Chromium may skip `cancel`, so `close` ends the tour. The
       // buttons end it without closing; the dialog then leaves with the component.
       onClose={() => onEnd(false)}
-      className="tour-card w-80 max-w-[calc(100vw-32px)] space-y-2 rounded-lg border border-line-strong bg-surface p-4 text-ink"
+      // Without a target it stays where the browser centres a modal.
+      style={placed ? { margin: 0, inset: "auto", top: placed.top, left: placed.left } : undefined}
+      // No shadow: its border and ground set it apart. The notch sits outside its box.
+      className="tour-card w-tour max-w-[calc(100vw-16px)] overflow-visible rounded-lg border border-line-strong bg-surface p-4 text-ink"
     >
+      {placed && (
+        <span
+          aria-hidden="true"
+          style={
+            placed.side === "right" || placed.side === "left"
+              ? { top: placed.notch }
+              : { left: placed.notch }
+          }
+          className={`absolute size-3 rotate-45 border border-line-strong bg-surface ${NOTCH[placed.side]}`}
+        />
+      )}
       <p className="text-meta text-ink-muted tabular-nums">
         Step {index + 1} of {STEPS.length}
       </p>
-      <div aria-live="polite" className="space-y-1">
-        <h2 id={`${id}-title`} className="text-section font-semibold">
+      <div aria-live="polite">
+        <h2 id={`${id}-title`} className="mt-1 mb-2 text-section font-semibold">
           {step.title}
         </h2>
-        <p>{step.text}</p>
+        <p className="mb-4">{step.text}</p>
       </div>
-      <div className="flex flex-wrap items-center gap-2 pt-2">
+      <div className="flex items-center gap-2">
         <Button kind="ghost" small onClick={() => onEnd(false)}>
           End tour
         </Button>
@@ -187,24 +306,35 @@ export function ViewFooter({
 }) {
   const name = useId();
   return (
-    <div data-tour="view" className="space-y-1 border-t border-line p-2">
-      <fieldset className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 text-control">
-        <legend className="pb-1 text-meta font-semibold text-ink-muted">View</legend>
+    <div data-tour="view" className="flex flex-col gap-1 border-t border-line px-3 pt-2 pb-3">
+      <fieldset className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+        <legend className="float-left mr-1 text-meta leading-5 font-semibold text-ink-muted">
+          View
+        </legend>
         {VIEWS.map((v) => (
-          <label key={v.view} title={v.means} className="flex items-center gap-1.5">
+          <label
+            key={v.view}
+            title={v.means}
+            className="inline-flex cursor-pointer items-center gap-1.5 text-meta"
+          >
             <input
               type="radio"
               name={name}
               checked={view === v.view}
               onChange={() => onView(v.view)}
+              className="size-3.5"
             />
             {v.label}
           </label>
         ))}
       </fieldset>
-      <Button kind="ghost" small onClick={onShowAgain}>
+      <button
+        type="button"
+        onClick={onShowAgain}
+        className="-ml-1 self-start rounded-sm px-1 py-0.5 text-meta text-ink-muted underline underline-offset-2 hover:bg-hover hover:text-ink"
+      >
         Show the guide again
-      </Button>
+      </button>
     </div>
   );
 }

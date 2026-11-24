@@ -147,6 +147,8 @@
   --radius-md: 6px;
   --radius-lg: 8px;
 
+  --text-welcome: 28px;
+  --text-welcome--line-height: 36px;
   --text-page-title: 20px;
   --text-page-title--line-height: 28px;
   --text-section: 15px;
@@ -159,6 +161,10 @@
   --text-meta--line-height: 16px;
   --text-code-block: 12px;
   --text-code-block--line-height: 18px;
+
+  /* max-w-form keeps forms and prose readable; w-tour is the tour card */
+  --container-form: 720px;
+  --container-tour: 340px;
 }
 
 @layer base {
@@ -175,24 +181,17 @@
   }
 }
 
-/* The tour (GuideScreens.tsx): the part a step explains gets an accent ring, unlike the focus
-   ring, and the card sits beside it by CSS anchor positioning (WebView2 is Chromium), flipping to
-   the other side when there is no room. The ring is drawn inside, so the window's edge (the
-   status bar's top) cannot cut it off. */
-[data-tour-current] {
-  anchor-name: --tour-target;
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
+/* The tour (GuideScreens.tsx): the part a step explains gets a dashed accent line drawn inside it,
+   as its own layer rather than an outline, so the solid focus ring outside still shows. */
+[data-tour-current] { position: relative; }
+[data-tour-current]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--color-accent);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
 }
-.tour-card {
-  position-anchor: --tour-target;
-  inset: auto;
-  margin: 8px;
-  /* Last resort for a narrow window: under the target, running to the right edge. */
-  position-try-fallbacks: flip-block, flip-inline, bottom span-right;
-}
-.tour-card[data-place="right"] { position-area: right span-bottom; }
-.tour-card[data-place="right-up"] { position-area: right span-top; }
-.tour-card[data-place="below"] { position-area: bottom; }
 /* Transparent, so the part being explained stays in plain sight. */
 .tour-card::backdrop { background: transparent; }

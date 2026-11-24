@@ -15,14 +15,14 @@ import {
   showAgain,
 } from "./guide";
 import { Icon, type IconName } from "./Icon";
-import { NewProposal, ProposalPage, STATUS } from "./ProposalPage";
+import { NewProposal, PLAN_GROUP, ProposalPage, STATUS } from "./ProposalPage";
 import type { Proposal } from "./proposals";
 import { RunPage, runQuery } from "./RunPage";
 import {
-  type BadgeGroup,
   Button,
   CopyButton,
   NeedsCount,
+  plural,
   problem,
   StatusBadge,
   TechnicalView,
@@ -70,14 +70,6 @@ const STATES: Record<ConnectionState, { icon: IconName; iconTone: string; bar: s
       text: `Connected to ${HOST}`,
     },
   };
-
-const PLAN_GROUP: Record<Proposal["status"], BadgeGroup> = {
-  pending: "needs",
-  approved: "done",
-  rejected: "stopped",
-};
-
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 export function App() {
   const client = useMemo(() => createClient({ readToken }), []);
@@ -163,7 +155,8 @@ export function App() {
       <div className="flex h-screen flex-col bg-canvas text-ink">
         <Welcome
           view={guide.view}
-          onDone={(view, takeTour) => keep(finishWelcome(view, takeTour))}
+          onView={(view) => keep(setView(guide, view))}
+          onDone={(takeTour) => keep(finishWelcome(guide.view, takeTour))}
         />
       </div>
     );
@@ -345,6 +338,7 @@ export function App() {
                   client={client}
                   proposal={shownPlan}
                   folder={folder}
+                  activeRun={connected.active}
                   onOpenRun={(id) => show({ kind: "run", id })}
                 />
               ) : (

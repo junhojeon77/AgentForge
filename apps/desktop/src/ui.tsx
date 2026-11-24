@@ -12,6 +12,8 @@ import { Icon, type IconName } from "./Icon";
 import { log } from "./log";
 import type { Group } from "./runs";
 
+export const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
 export function problem(error: unknown): string {
   if (error instanceof ApiError) return error.detail ?? error.kind;
   // A check made before sending, such as a plan that is not JSON.
@@ -36,10 +38,11 @@ const BASE =
 const buttonClass = (kind: Kind, small: boolean) =>
   `${BASE} ${small ? "h-7 px-2" : "h-8 px-3"} ${KIND[kind]}`;
 
-/** The secondary button, for screens that style a native button by class. */
-export const BUTTON = buttonClass("secondary", false);
-
 export const FIELD = "rounded-md border border-line-strong bg-surface px-2 py-1.5 text-ink";
+
+/** A page's title and its one-line lede. */
+export const PAGE_TITLE = "font-display text-page-title font-semibold wrap-anywhere";
+export const LEDE = "max-w-[62ch] text-ink-muted";
 
 /** A native button. While its request is in flight it shows the static arc; the label stays. */
 export function Button({
@@ -121,13 +124,13 @@ const TONES = {
 export function Alert({
   tone = "problem",
   title,
-  text,
+  text = "",
   onDismiss,
   children,
 }: {
   tone?: keyof typeof TONES;
-  title: string;
-  text: string;
+  title?: string;
+  text?: string;
   onDismiss?: () => void;
   children?: ReactNode;
 }) {
@@ -138,7 +141,8 @@ export function Alert({
     >
       <Icon name={tone === "problem" ? "problem" : "needs-you"} className="mt-0.5 size-4 shrink-0" />
       <p className="min-w-0 flex-1 basis-48 whitespace-pre-wrap wrap-anywhere">
-        <strong className="font-semibold">{title}</strong> {text}
+        {title && <strong className="font-semibold">{title} </strong>}
+        {text}
       </p>
       {children}
       {onDismiss && (
@@ -249,7 +253,7 @@ export function Confirm({
         if (e.key === "Escape") setStep("kept");
       }}
       className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 ${
-        destructive ? "border-danger bg-danger-soft" : "border-line-strong bg-surface"
+        destructive ? "border-danger bg-danger-soft" : "border-line-strong bg-panel"
       }`}
     >
       <span className="text-[13px] font-semibold text-ink">{question}</span>
@@ -277,6 +281,7 @@ export function ReasonForm({
   hint,
   button,
   name,
+  kind = "confirm",
   disabled,
   busy = false,
   onSubmit,
@@ -285,6 +290,8 @@ export function ReasonForm({
   label: string;
   hint?: string;
   button: string;
+  // Outlined where the form is always open, so it does not compete with the page's primary.
+  kind?: "confirm" | "destructive";
   name?: string;
   disabled: boolean;
   busy?: boolean;
@@ -325,7 +332,7 @@ export function ReasonForm({
       <div className="flex flex-wrap gap-2">
         <Button
           type="submit"
-          kind="confirm"
+          kind={kind}
           icon="reject"
           busy={busy}
           aria-label={name}
@@ -343,38 +350,117 @@ export function ReasonForm({
   );
 }
 
-/** True in the technical view: every technical section starts open. */
+/** True in the technical view: every More options section starts open. */
 export const TechnicalView = createContext(false);
 
-// Technical controls stay one click away; the view chosen on the welcome screen decides
-// whether they start open.
-export function MoreOptions({ children }: { children: ReactNode }) {
-  const technical = useContext(TechnicalView);
-  return (
-    <details open={technical} className="text-sm">
-      <summary className="cursor-pointer">More options</summary>
-      <div className="mt-2 space-y-2 border-l-2 border-line pl-3">{children}</div>
-    </details>
-  );
-}
+const SUMMARY = "cursor-pointer list-none [&::-webkit-details-marker]:hidden";
+// Keyed to the fold's own details, unlike `group-open:`, which any open ancestor would match.
+const CHEVRON = "size-4 shrink-0 text-ink-muted [details[open]>summary>&]:rotate-90";
 
-export function Field({
+/** A fold: a summary row with a hint of what is inside, then its content indented, not boxed. A
+ * hand toggle lasts until the screen is left; `open` (a field error inside) always opens it. */
+export function Fold({
   label,
   hint,
+  startOpen,
+  open: force = false,
+  rule = true,
   children,
 }: {
   label: string;
   hint?: string;
-  children: (id: string) => ReactNode;
+  startOpen: boolean;
+  open?: boolean;
+  /** The line above that marks where the plain fields end. */
+  rule?: boolean;
+  children: ReactNode;
+}) {
+  const [hand, setHand] = useState<boolean>();
+  const open = force || (hand ?? startOpen);
+  return (
+    <details
+      open={open}
+      // Fired for React's own changes too; only a toggle that differs from the render is a hand's.
+      onToggle={(e) => {
+        if (e.currentTarget.open !== open) setHand(e.currentTarget.open);
+      }}
+      className={rule ? "border-t border-line" : undefined}
+    >
+      <summary
+        className={`${SUMMARY} my-1 -ml-2 flex min-h-8 items-center gap-2 rounded-md px-2 text-[13px] hover:bg-hover`}
+      >
+        <Icon name="chevron" className={CHEVRON} />
+        <span className="font-semibold whitespace-nowrap text-ink">{label}</span>
+        {hint && (
+          <span className="min-w-0 truncate text-meta text-ink-muted [details[open]>summary>&]:hidden">
+            {hint}
+          </span>
+        )}
+      </summary>
+      <div className="flex flex-col gap-3 pb-4 pl-6">{children}</div>
+    </details>
+  );
+}
+
+// Technical controls stay one click away; the view chosen on the welcome screen decides
+// whether they start open.
+export function MoreOptions(props: {
+  hint?: string;
+  open?: boolean;
+  rule?: boolean;
+  children: ReactNode;
+}) {
+  return <Fold label="More options" startOpen={useContext(TechnicalView)} {...props} />;
+}
+
+/** Work only developers do, such as writing a plan as JSON. Folded in both views: a large editor
+ * open by default would push the plain path down. */
+export function ForDevelopers({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="rounded-lg border border-line bg-canvas">
+      <summary
+        className={`${SUMMARY} flex flex-wrap items-center gap-2 rounded-lg px-4 py-3 font-semibold hover:bg-hover [details[open]>&]:rounded-b-none [details[open]>&]:border-b [details[open]>&]:border-line`}
+      >
+        <Icon name="chevron" className={CHEVRON} />
+        {title}
+        <span className="rounded-full border border-line px-1.5 font-mono text-[11px] leading-4 font-normal text-ink-muted">
+          for developers
+        </span>
+      </summary>
+      <div className="flex flex-col gap-3 p-4">{children}</div>
+    </details>
+  );
+}
+
+/** A labelled field; `children` gets the input's id and the hint's, for `aria-describedby`. */
+export function Field({
+  label,
+  hint,
+  lead = false,
+  children,
+}: {
+  label: string;
+  hint?: ReactNode;
+  /** The screen's main field: a larger label. */
+  lead?: boolean;
+  children: (id: string, hintId: string | undefined) => ReactNode;
 }) {
   const id = useId();
+  const hintId = hint ? `${id}-hint` : undefined;
   return (
-    <div className="flex flex-col gap-1 text-sm">
-      <label htmlFor={id} className="font-medium">
+    <div className="flex min-w-0 flex-col gap-1">
+      <label
+        htmlFor={id}
+        className={`font-semibold text-ink ${lead ? "text-body" : "text-control"}`}
+      >
         {label}
       </label>
-      {children(id)}
-      {hint && <span className="text-ink-muted">{hint}</span>}
+      {children(id, hintId)}
+      {hint && (
+        <div id={hintId} className="text-meta text-ink-muted">
+          {hint}
+        </div>
+      )}
     </div>
   );
 }

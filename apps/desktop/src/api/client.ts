@@ -21,6 +21,13 @@ function describe(detail: unknown): string | undefined {
   return detail.map((e) => `${(e.loc ?? []).join(".")}: ${e.msg}`).join("; ");
 }
 
+/** The field errors of a refused request (a 422's list), else none. */
+export function fieldErrors(error: unknown): { loc: string[]; msg: string }[] {
+  const detail = error instanceof ApiError ? (error.body as { detail?: unknown })?.detail : undefined;
+  if (!Array.isArray(detail)) return [];
+  return detail.map((e) => ({ loc: (e.loc ?? []).map(String), msg: String(e.msg) }));
+}
+
 /** A request with a JSON body; FastAPI parses a body as JSON only with this content type. */
 export function jsonBody(body: unknown, method = "POST"): RequestInit {
   return {
