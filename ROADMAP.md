@@ -77,6 +77,16 @@ From M6: a command-line option for allowed origins. Details are in the
 
 ## Verification history
 
+Verified on 2026-11-24 after the nine fixes from the repo audit (a task blocked again when a
+retry leaves another dependency failed; a taken run name refused before billed planning; a
+hand-written plan's unknown checks refused at approval; `serve` refusing a busy port before
+writing its token; task cards saying Role; agent removal run on the event loop; Retry and
+Recover hidden while another run is active; `GET /runs/unfinished` removed; one `plural`):
+**253 tests passed and 1 skipped** (4 new, 1 removed with the route), Ruff lint passed, and
+all 31 Python files passed the formatting check; **162 Vitest tests passed** (4 new), and the
+desktop `tsc` type check and Vite build passed. The window was not opened. No billed call was
+made.
+
 Verified on 2026-11-23 after M6 slice 8 (the visual design of Ask for something, the plan page,
 Your team, the welcome screen and the tour): **158 Vitest tests passed** (14 new), and the
 desktop `tsc` type check and Vite build passed. The backend is unchanged: **250 tests passed and

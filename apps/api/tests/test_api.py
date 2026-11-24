@@ -1,5 +1,6 @@
 import json
 import logging
+import socket
 import sys
 
 import pytest
@@ -92,7 +93,6 @@ def approve(client, run_id="r1", **body):
 
 
 ROUTES = [
-    ("get", "/runs/unfinished"),
     ("get", "/runs/r1"),
     ("get", "/runs/r1/events"),
     ("post", "/proposals"),
@@ -257,7 +257,7 @@ def test_a_failed_task_of_a_finished_run_is_retried_through_the_api(make_client)
     approve(client)
     report = until(client, "r1", finished)
     assert status(report, "a") == "FAILED" and status(report, "b") == "BLOCKED"
-    assert client.get("/runs/unfinished", headers=AUTH).json() == {"runs": []}
+    assert client.get("/runs", headers=AUTH).json()["unfinished"] == []
 
     assert client.post("/runs/r1/tasks/a/retry", headers=AUTH).status_code == 202
     report = until(client, "r1", lambda r: finished(r) and status(r, "b") == "COMPLETED")
@@ -543,14 +543,16 @@ def test_cli_serve_builds_the_settings_and_writes_a_fresh_token(tmp_path, monkey
     monkeypatch.setattr(agentforge.api, "serve", lambda s, port: started.append((s, port)))
 
     python = r"C:\Program Files\Python\python.exe"
+    with socket.create_server(("127.0.0.1", 0)) as probe:  # a port free on this machine
+        free = probe.getsockname()[1]
     code = cli(
-        ["serve", "--worktrees", str(tmp_path / "trees"), "--port", "9000",
+        ["serve", "--worktrees", str(tmp_path / "trees"), "--port", str(free),
          "--check", f'unit="{python}" -m pytest', "--store", str(tmp_path / "runs.db")]
     )  # fmt: skip
 
     assert code == 0
     ((serving, port),) = started
-    assert port == 9000
+    assert port == free
     assert serving.checks == {"unit": (python, "-m", "pytest")}
     assert serving.agents == tmp_path / "appdata" / "AgentForge" / "agents"
     token_file = tmp_path / "appdata" / "AgentForge" / "api-token"
@@ -558,3 +560,55 @@ def test_cli_serve_builds_the_settings_and_writes_a_fresh_token(tmp_path, monkey
     with pytest.raises(SystemExit) as stopped:
         cli(["serve", "--worktrees", str(tmp_path), "--check", "unit"])
     assert stopped.value.code == 2
+
+
+def test_a_taken_run_name_is_refused_before_the_lead_agent_plans(
+    make_client, tmp_path, monkeypatch, caplog
+):
+    caplog.set_level(logging.DEBUG, logger="agentforge.api")
+    log = tmp_path / "call.json"
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
+    client = make_client()
+    client.post("/proposals", json=hand_plan("r1"), headers=AUTH)
+    body = {"request": "SECRET-REQUEST", "run_id": "r1", "workspace": str(tmp_path)}
+
+    refused = client.post("/proposals/from-request", json=body, headers=AUTH)
+
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == "proposal r1 already exists"
+    # Planning is billed: no Claude session may start for a plan that could not be saved.
+    assert not log.exists() and not log.with_name("call.json.all").exists()
+    assert "POST /proposals/from-request answered 409" in caplog.text
+    assert "SECRET-REQUEST" not in caplog.text
+
+
+def test_a_hand_plan_naming_a_check_the_server_lacks_is_refused_at_approve(make_client):
+    client = make_client()
+    lint = {"id": "a", "run_id": "r1", "title": "a", "role": "backend",
+            "execution_constraints": ["check:lint"]}  # fmt: skip
+    client.post("/proposals", json=hand_plan("r1", lint), headers=AUTH)
+
+    refused = client.post("/proposals/r1/approve", json={"repository": "C:/repo"}, headers=AUTH)
+
+    # Approved, it would bill every attempt and fail each one on "unknown check: lint".
+    assert refused.status_code == 400
+    assert refused.json()["detail"] == "task a: unknown check: lint"
+    assert client.get("/runs", headers=AUTH).json()["active"] is None
+    assert client.get("/proposals/r1", headers=AUTH).json()["status"] == "pending"
+
+
+def test_cli_serve_refuses_a_port_in_use_before_writing_a_token(tmp_path, monkeypatch, capsys):
+    # A second serve must not replace the token of the server already on the port.
+    import agentforge.api
+    from agentforge.__main__ import cli
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setattr(agentforge.api, "serve", lambda s, port: pytest.fail("started"))
+    with socket.create_server(("127.0.0.1", 0)) as running:
+        port = running.getsockname()[1]
+        with pytest.raises(SystemExit) as stopped:
+            cli(["serve", "--worktrees", str(tmp_path / "trees"), "--port", str(port)])
+
+    assert stopped.value.code == 2
+    assert f"port {port} is in use" in capsys.readouterr().err
+    assert not (tmp_path / "appdata" / "AgentForge" / "api-token").exists()

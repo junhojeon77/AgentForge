@@ -251,7 +251,7 @@ Every transition says why it happened:
 | `COMPLETED` | `validation accepted` |
 | `PAUSED` | `pause_task was called while RUNNING` or `pause_run was called while PENDING`: who paused it and the status it had. `recovered after a restart while RUNNING`: the process stopped while its worker was in flight. `pause_task was called while PAUSED`: a task held by `pause_run` was then paused by hand |
 | `FAILED` | `attempt 3 of 3 failed (validation_rejected); no attempts left`, or `…; not retried: validator errors are setup problems` |
-| `BLOCKED` | `blocked by a, which is FAILED` or `blocked by a, which is CANCELLED`. `a` is the task that failed or was cancelled, not necessarily a direct dependency |
+| `BLOCKED` | `blocked by a, which is FAILED` or `blocked by a, which is CANCELLED`. `a` is the task that failed or was cancelled, not necessarily a direct dependency. A retry unblocks a task only for the task retried: if another of its dependencies failed, it is blocked again by that one at once |
 | `CANCELLED` | `cancel_task was called`, `cancel_run was called`, `saving the run failed (OperationalError)`, `run() stopped by CancelledError` (the type of the error that ended `run()`), or `worker task was cancelled` (the asyncio task was cancelled from outside the scheduler) |
 
 For `PAUSED`, `BLOCKED` and `CANCELLED` the same text is in `TaskState.message`, and a paused or

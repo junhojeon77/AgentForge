@@ -303,7 +303,9 @@ you give it rights. Each plan is billed: up to six short Claude sessions by defa
 ```
 
 The server listens on `127.0.0.1:8765` only and writes a new token to
-`%APPDATA%\AgentForge\api-token` at each start; send it as `Authorization: Bearer <token>`.
+`%APPDATA%\AgentForge\api-token` at each start. If the port is already in use (usually a server
+that is still running), `serve` stops before writing its token, so the running one keeps working.
+Send it as `Authorization: Bearer <token>`.
 Propose a plan (`POST /proposals`, or `/proposals/from-request` for the lead agent), approve it
 with the rights each task gets, then approve each worker's diff before its checks run, and
 follow it all on `GET /runs/{id}/events`. `GET /runs`, `GET /proposals` and `GET /checks` list

@@ -32,6 +32,7 @@ import {
   Confirm,
   CopyButton,
   FIELD,
+  plural,
   problem,
   ReasonForm,
   StatusBadge,
@@ -140,11 +141,14 @@ export function RunPage({
   runId,
   live,
   interrupted,
+  otherRun,
 }: {
   client: Client;
   runId: string;
   live: boolean;
   interrupted: boolean;
+  /** Another run that is active; this one cannot be reopened until it ends. */
+  otherRun: string | null;
 }) {
   const queryClient = useQueryClient();
   const report = useQuery(runQuery(client, runId));
@@ -171,7 +175,7 @@ export function RunPage({
 
   return (
     <section aria-labelledby="run-title" className="space-y-6">
-      <RunHeader client={client} runId={runId} state={state} run={run} />
+      <RunHeader client={client} runId={runId} state={state} run={run} otherRun={otherRun} />
       {live && stopped && (
         <Alert
           tone="needs"
@@ -202,6 +206,7 @@ export function RunPage({
                   client={client}
                   runId={runId}
                   live={live}
+                  otherActive={otherRun !== null}
                   state={task}
                   attempts={run.attempts.filter((a) => a.task_id === task.task.id)}
                 />
@@ -235,17 +240,23 @@ function RunHeader({
   runId,
   state,
   run,
+  otherRun,
 }: {
   client: Client;
   runId: string;
   state: RunState;
   run: RunReport | undefined;
+  otherRun: string | null;
 }) {
   const control = useControl(client, runId);
   const busy = control.isPending;
   const doing = busy ? control.variables?.action : undefined;
   const send = (action: RunAction) => control.mutate({ action });
   const paused = run?.tasks.some((t) => t.status === "PAUSED") ?? false;
+  // Recover and Retry reopen this run, which the server allows only while no other run is active.
+  const reopenable =
+    state === "Interrupted" ||
+    (run?.tasks.some((t) => t.status === "FAILED" || t.status === "CANCELLED") ?? false);
   return (
     <header className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
@@ -266,6 +277,12 @@ function RunHeader({
             <StatusBadge group={RUN_GROUP[state]} label={state} />
             {run && <Meta items={[runSummary(run.tasks)]} />}
           </p>
+          {otherRun && reopenable && (
+            <p className="text-meta text-ink-muted wrap-anywhere">
+              Run <Code>{otherRun}</Code> is active. One run at a time, so this run's Retry and
+              Recover wait until it ends.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {state === "Active" && (
@@ -302,7 +319,7 @@ function RunHeader({
               />
             </>
           )}
-          {state === "Interrupted" && (
+          {state === "Interrupted" && !otherRun && (
             <Button
               kind="primary"
               icon="retry"
@@ -325,12 +342,14 @@ function TaskCard({
   client,
   runId,
   live,
+  otherActive,
   state,
   attempts,
 }: {
   client: Client;
   runId: string;
   live: boolean;
+  otherActive: boolean;
   state: TaskState;
   attempts: TaskAttempt[];
 }) {
@@ -341,7 +360,7 @@ function TaskCard({
   const doing = busy ? control.variables?.action : undefined;
   const send = (action: TaskAction, reason?: string) =>
     control.mutate({ action, task: task.id, reason });
-  const actions = taskActions(status, live, state.attempt_number);
+  const actions = taskActions(status, live, state.attempt_number, otherActive);
   const checks = task.execution_constraints
     .filter((c) => c.startsWith("check:"))
     .map((c) => c.slice("check:".length));
@@ -373,7 +392,7 @@ function TaskCard({
               Task <Code>{task.id}</Code>
             </>,
             <>
-              Agent <Code>{task.role}</Code>
+              Role <Code>{task.role}</Code>
             </>,
             state.attempt_number
               ? `Attempt ${state.attempt_number} of ${task.max_attempts}`
@@ -579,7 +598,7 @@ function DiffView({ diff, where, folded }: { diff: string; where: string; folded
     );
   }
   const { files, added, removed } = diffStats(diff);
-  const stats = `${files} ${files === 1 ? "file" : "files"} · +${added} −${removed}`;
+  const stats = `${plural(files, "file", "files")} · +${added} −${removed}`;
   const body = (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center justify-between gap-2">

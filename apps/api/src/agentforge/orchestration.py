@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 # Statuses of a worker in flight; after a restart such a task is paused for a person to resume.
 _IN_FLIGHT = (TaskStatus.ASSIGNED, TaskStatus.RUNNING, TaskStatus.VALIDATING)
+# Finished without completing: a task that depends on one can never start.
+_NEVER_DONE = (TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.BLOCKED)
 
 
 class WorkerExecutor(Protocol):
@@ -306,7 +308,28 @@ class Scheduler:
 
     def _dispatch(self) -> None:
         for task_id, state in self._states.items():
-            if state.status == TaskStatus.PENDING and all(
+            if state.status != TaskStatus.PENDING:
+                continue
+            # A retry unblocks only what the retried task blocked; another dependency may still
+            # have failed, and the task could then never start.
+            stuck = next(
+                (
+                    self._states[dependency]
+                    for dependency in state.task.dependencies
+                    if self._states[dependency].status in _NEVER_DONE
+                ),
+                None,
+            )
+            if stuck is not None:
+                # Blocked by the first failure, as _block_descendants does, so retrying it
+                # unblocks this task again.
+                origin = stuck.blocked_by or stuck.task.id
+                why = f"blocked by {origin}, which is {self._states[origin].status}"
+                self._transition(
+                    task_id, TaskStatus.BLOCKED, detail=why, message=why, blocked_by=origin
+                )
+                self._wake.set()  # the next pass blocks this task's own dependents
+            elif all(
                 self._states[dependency].status == TaskStatus.COMPLETED
                 for dependency in state.task.dependencies
             ):

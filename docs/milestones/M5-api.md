@@ -44,12 +44,11 @@ A pause never skips an approval: a task waiting for one stays waiting through `p
 
 | Method and path | Does |
 |---|---|
-| `POST /proposals/from-request` | Body `{request, run_id, workspace, max_revisions}`. The lead agent plans it; 201 with the proposal, or 422 with the rounds when the plan is rejected |
+| `POST /proposals/from-request` | Body `{request, run_id, workspace, max_revisions}`. The lead agent plans it; 201 with the proposal, or 422 with the rounds when the plan is rejected. 409 before any planning when `run_id` already names a run or a proposal |
 | `POST /proposals` | Body: a `RunPlan`. 201 with the proposal; 400 if the plan breaks the rules |
 | `GET /proposals/{id}` | The proposal: plan, source (`lead` or `hand`), rounds, status, reason, and `agents`: new agents the lead proposed (since M6 slice 5) |
-| `POST /proposals/{id}/approve` | Body `{repository, rights: {task_id: TaskRights}, agents?}`. 202; starts the run with the same id. `agents` (since M6 slice 5) are the person's versions of the plan's new agents: the same ids and roles, or 400; an id that exists by now is 409. They are saved to the agents folder only after every check passes |
+| `POST /proposals/{id}/approve` | Body `{repository, rights: {task_id: TaskRights}, agents?}`. 202; starts the run with the same id. `agents` (since M6 slice 5) are the person's versions of the plan's new agents: the same ids and roles, or 400; an id that exists by now is 409. A check the server does not have is 400, whether ticked in `rights` or already named in the plan's `execution_constraints` (`check:<name>`). They are saved to the agents folder only after every check passes |
 | `POST /proposals/{id}/reject` | Body `{reason}` |
-| `GET /runs/unfinished` | `{"runs": [...]}`: saved runs with unfinished tasks |
 | `GET /runs/{id}` | The `RunReport`: live while the run is active, from the store afterwards |
 | `POST /runs/{id}/recover` | 202; the run comes back with interrupted work paused; resume it |
 | `POST /runs/{id}/pause`, `/resume`, `/cancel` | The active run |
@@ -60,6 +59,8 @@ A pause never skips an approval: a task waiting for one stays waiting through `p
 M6 added `GET /agents`, `PUT /agents/{id}`, `DELETE /agents/{id}`, `GET /runs`,
 `GET /proposals`, `GET /checks` and CORS for the desktop app; see
 [the M6 doc](M6-desktop.md#contract-added-to-m5s).
+`GET /runs/unfinished` was removed on 2026-11-24: `GET /runs` returns the same list as
+`unfinished`.
 
 Answers: 401 without the right token; 404 for an unknown run, task or proposal; 400 when a rule
 refuses (the message says which); 409 when another run is active or a proposal was already
@@ -73,7 +74,7 @@ Library changes the API builds on:
 | `FailureReason.REVIEW_REJECTED` | A person rejected the diff; retried like any failure while attempts are left |
 | `Scheduler(review_edits=True)` | Tasks that allow `"edit"` wait for approval after the worker succeeds. Off by default; the server turns it on |
 | `approve_task(id)`, `reject_task(id, reason)` | `ValueError` unless the task is waiting; `KeyError` for an unknown task |
-| `retry_task(id)` | A `FAILED` or `CANCELLED` task of the active run gets one more attempt (its limit is raised, up to 5); the tasks it blocked wait again |
+| `retry_task(id)` | A `FAILED` or `CANCELLED` task of the active run gets one more attempt (its limit is raised, up to 5); the tasks it blocked wait again, unless another of their dependencies failed or was cancelled: those are blocked by that one instead |
 | `recover(run_id, retry=[...])` | Also reopens a finished run for the named tasks |
 | `Scheduler(on_transition=...)` | Called with `(run_id, transition)` on every transition; a failing callback is logged, never stops the run |
 | `Proposal`, `PlanRound` | In `domain.py`; proposals are saved in the store (migration `0002`) |

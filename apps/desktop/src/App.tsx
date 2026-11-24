@@ -322,6 +322,7 @@ export function App() {
                   interrupted={
                     view.id !== connected.active && connected.unfinished.includes(view.id)
                   }
+                  otherRun={connected.active !== view.id ? connected.active : null}
                 />
               ) : view.kind === "agents" ? (
                 <AgentsPage client={client} />

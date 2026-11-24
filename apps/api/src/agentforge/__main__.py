@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import shlex
+import socket
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -222,6 +223,12 @@ def _serve(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             parser.error(f"--check needs NAME=COMMAND, got {item!r}")
         # posix=False keeps Windows backslashes; the quotes around a part are removed.
         checks[name] = tuple(part.strip('"') for part in shlex.split(command, posix=False))
+    # Before the token: a second serve would otherwise replace the running server's token and
+    # only then fail on the busy port, locking the app out of the server that runs.
+    try:
+        socket.create_server(("127.0.0.1", args.port)).close()
+    except OSError:
+        parser.error(f"port {args.port} is in use: is AgentForge already running?")
     token = api.write_token(api.default_token_path())
     settings = api.ApiSettings(
         store_path=Path(args.store) if args.store else default_path(),

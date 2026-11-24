@@ -114,7 +114,11 @@ def _granted(plan: RunPlan, approval: Approval, checks: Mapping[str, object]) ->
         rights = approval.rights.get(task.id, TaskRights())
         if "check" in rights.allowed_operations and "edit" not in rights.allowed_operations:
             raise _Refused(400, f'task {task.id}: "check" needs "edit" too')
-        if missing := [name for name in rights.checks if name not in checks]:
+        # A hand-written plan can name checks too; one the server lacks could never pass.
+        named = [
+            c.removeprefix("check:") for c in task.execution_constraints if c.startswith("check:")
+        ]
+        if missing := [name for name in (*named, *rights.checks) if name not in checks]:
             raise _Refused(400, f"task {task.id}: unknown check: {', '.join(missing)}")
         repository = rights.repository_reference or approval.repository
         if not repository:
@@ -297,6 +301,11 @@ def create_app(
     async def propose_from_request(body: PlanBody):
         if not Path(body.workspace).is_dir():  # noqa: ASYNC240
             raise _Refused(400, f"workspace is not a folder: {body.workspace}")
+        # Before planning, which is billed; the save below still catches a name taken meanwhile.
+        if body.run_id in server.store.runs():
+            raise _Refused(409, f"run {body.run_id} is already saved; use a new run id")
+        if server.store.get_proposal(body.run_id) is not None:
+            raise _Refused(409, f"proposal {body.run_id} already exists")
         runner = ClaudeCodeRunner(
             command=settings.claude_command, max_budget_usd=settings.max_budget_usd
         )
@@ -415,8 +424,10 @@ def create_app(
         logger.debug("api: agent %s saved", agent.id)
         return agent
 
+    # On the event loop, unlike the routes above: in threads, two removals could both pass the
+    # last-agent check and empty the folder. Its file work is one glob and one unlink.
     @app.delete("/agents/{agent_id}")
-    def remove_agent(agent_id: str) -> dict:
+    async def remove_agent(agent_id: str) -> dict:
         folder = personas.setup(settings.agents)
         # An empty folder would bring back all five defaults, so the last agent stays.
         if [path.name for path in folder.glob("*.md")] == [f"{agent_id}.md"]:
@@ -429,10 +440,6 @@ def create_app(
             raise _Refused(400, str(error)) from None
         logger.debug("api: agent %s removed", agent_id)
         return {"ok": True}
-
-    @app.get("/runs/unfinished")
-    async def unfinished() -> dict:
-        return {"runs": server.store.unfinished_runs()}
 
     @app.get("/runs/{run_id}")
     async def report(run_id: str) -> RunReport:

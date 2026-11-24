@@ -1,5 +1,6 @@
 import { type Client, jsonBody } from "./api/client";
 import type { Transition } from "./api/events";
+import { plural } from "./ui";
 
 // The parts of the server's RunReport (domain.py) that the run page shows.
 export type TaskStatus =
@@ -87,11 +88,16 @@ export function failureLabel(code: string): string | null {
 export const MAX_ATTEMPTS = 5;
 
 /** The controls a task offers. They mirror the scheduler's rules in orchestration.py. */
-export function taskActions(status: TaskStatus, live: boolean, attempt: number): TaskAction[] {
-  // The API reopens a finished run for a retry, so it needs no active run; _retry_limit
-  // refuses a sixth attempt.
+export function taskActions(
+  status: TaskStatus,
+  live: boolean,
+  attempt: number,
+  otherActive = false,
+): TaskAction[] {
+  // The API reopens a finished run for a retry, but only while no other run is active (one run
+  // at a time); _retry_limit refuses a sixth attempt.
   if (status === "FAILED" || status === "CANCELLED") {
-    return attempt < MAX_ATTEMPTS ? ["retry"] : [];
+    return attempt < MAX_ATTEMPTS && (live || !otherActive) ? ["retry"] : [];
   }
   if (!live || status === "COMPLETED" || status === "BLOCKED") return [];
   if (status === "AWAITING_APPROVAL") return ["approve", "reject", "cancel"];
@@ -102,12 +108,12 @@ export function taskActions(status: TaskStatus, live: boolean, attempt: number):
 export function retriesLeft(attempt: number): string {
   const left = MAX_ATTEMPTS - attempt;
   if (left <= 0) return `All ${MAX_ATTEMPTS} attempts used`;
-  return `${left} more ${left === 1 ? "attempt" : "attempts"} allowed (${MAX_ATTEMPTS} at most)`;
+  return `${plural(left, "more attempt", "more attempts")} allowed (${MAX_ATTEMPTS} at most)`;
 }
 
 /** The run header's summary, e.g. "5 tasks · 1 completed · 2 waiting for you". */
 export function runSummary(tasks: { status: TaskStatus }[]): string {
-  const parts = [`${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`];
+  const parts = [plural(tasks.length, "task", "tasks")];
   const completed = tasks.filter((t) => t.status === "COMPLETED").length;
   const waiting = tasks.filter((t) => t.status === "AWAITING_APPROVAL").length;
   if (completed) parts.push(`${completed} completed`);

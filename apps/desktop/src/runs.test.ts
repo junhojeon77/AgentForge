@@ -52,6 +52,18 @@ describe("taskActions", () => {
   ] as const)("%s after %i attempts offers %j: the server allows 5 at most", (status, n, expected) => {
     expect(taskActions(status, true, n)).toEqual(expected);
   });
+
+  it.each([
+    ["FAILED", true, []],
+    ["CANCELLED", true, []],
+    ["FAILED", false, ["retry"]],
+    ["CANCELLED", false, ["retry"]],
+  ] as const)(
+    "%s in a run that is not active, another run active %s, offers %j: one run at a time",
+    (status, otherActive, expected) => {
+      expect(taskActions(status, false, 1, otherActive)).toEqual(expected);
+    },
+  );
 });
 
 describe("retriesLeft", () => {

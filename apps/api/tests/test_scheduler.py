@@ -1293,3 +1293,49 @@ async def test_retry_is_refused_for_a_task_that_did_not_fail_and_at_the_cap(capl
         "run run task a: retry refused: task a has already used the maximum of 5 attempts"
         in warnings
     )
+
+
+async def test_retrying_one_failed_dependency_keeps_its_dependent_blocked_by_the_other(caplog):
+    # c needs a and b; both fail; retrying a alone must not leave c waiting on failed b forever.
+    caplog.set_level(logging.DEBUG, logger="agentforge.orchestration")
+    failed, both_failed = set(), asyncio.Event()
+
+    def seen(_run_id, transition):
+        if transition.status == TaskStatus.FAILED:
+            failed.add(transition.task_id)
+            if failed >= {"a", "b"}:
+                both_failed.set()
+
+    class Executor:
+        def __init__(self):
+            self.gate = asyncio.Event()  # keeps the run active until the retry is made
+            self.fixed = False
+
+        async def execute(self, assignment):
+            if assignment.task.id == "d":
+                await self.gate.wait()
+            elif assignment.task.id == "b" or not self.fixed:
+                return WorkerResult(success=False, message="failed")
+            return WorkerResult(success=True)
+
+    executor = Executor()
+    engine = scheduler(executor, on_transition=seen)
+    engine.register_worker(AgentConfig(id="tester", role="qa"), executor)
+    running = asyncio.create_task(
+        engine.run(
+            plan(task("a"), task("b"), task("c", dependencies=("a", "b")), task("d", role="qa"))
+        )
+    )
+    await asyncio.wait_for(both_failed.wait(), 2)
+    executor.fixed = True
+    await engine.retry_task("a")
+    executor.gate.set()
+    report = await asyncio.wait_for(running, 2)
+
+    states = {t.task.id: t for t in report.tasks}
+    assert states["a"].status == TaskStatus.COMPLETED
+    assert (states["c"].status, states["c"].blocked_by) == (TaskStatus.BLOCKED, "b")
+    assert states["c"].message == "blocked by b, which is FAILED"
+    details = [t.detail for t in report.transitions if t.task_id == "c"]
+    assert details[-2:] == ["unblocked: retry was called on a", "blocked by b, which is FAILED"]
+    assert "task c: BLOCKED (attempt 0, worker None): blocked by b, which is FAILED" in caplog.text

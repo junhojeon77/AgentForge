@@ -168,8 +168,8 @@ active run's item shows its own count of waiting diffs.
 
 **The run page.** The header shows "Run <id>" with **Copy run id**, the state as a badge and a
 summary ("5 tasks · 1 completed · 2 waiting for you"), and the run's controls; **Recover run** is
-the page's one primary button. Each task card shows its status in words, then Task, Agent,
-Attempt, its rights, its checks and the tasks it waits for ("After `build`"), a failure in plain
+the page's one primary button. Each task card shows its status in words, then Task, Role (each
+attempt names its agent), Attempt, its rights, its checks and the tasks it waits for ("After `build`"), a failure in plain
 words with its code ("A check failed · `validation_rejected`") and its latest note. A task
 waiting for review has an amber border. **Retry** says how many attempts are left ("2 more
 attempts allowed (5 at most)") and is not offered once all 5 are used, since the server would
@@ -268,11 +268,11 @@ without a refresh button.
 | Control | Shown for |
 |---|---|
 | Pause run, Cancel run | The active run; Resume run too when a task is paused |
-| Recover run | An interrupted run |
+| Recover run | An interrupted run, while no other run is active |
 | Pause, Cancel | A task of the active run that is waiting or working |
 | Resume, Cancel | A paused task of the active run |
 | Approve diff, Reject diff, Cancel | A task of the active run waiting for approval |
-| Retry | A failed or cancelled task, in any run (the API reopens a finished run) |
+| Retry | A failed or cancelled task: in the active run, or in another run while no run is active (the API reopens a finished run, one run at a time) |
 
 **A diff is reviewed where it is shown.** The waiting attempt opens with its diff, an Approve
 diff button and a reject form whose reason is required; the next attempt is told it.
@@ -372,16 +372,16 @@ one default in a new profile keeps the other four.
 |---|---|
 | Why does the app say "No token yet"? | The token file is missing: start `serve`. The console line names the path |
 | Why "Server offline" while `serve` runs? | It must listen on `127.0.0.1:8765`; check the server's port |
-| Why "Token refused"? | The file holds a token the server does not accept, even after re-reading: a second server, or a file written by hand |
+| Why "Token refused"? | The file holds a token the server does not accept, even after re-reading: a file written by hand, or a server started with another `APPDATA`. A second `serve` on the same port stops before writing its token ("port 8765 is in use") |
 | Why did the page stop following the run? | "Live updates stopped:" under the run title says why (an unknown run or a refused token); a drop reconnects by itself |
 | Why did my click do nothing? | The server refused it: its `detail` is shown next to the control, and the console has `POST <path> answered <status>` |
 | Did the app send my approve, pause or retry? | The console's `POST /runs/<id>/tasks/<task>/<action> answered 200`; the run's History shows the server's reason, such as `approve_task was called` |
 | Where did my reject reason go? | Under that attempt, as its reason (`TaskAttempt.message`); the next attempt is told it. It is never logged |
-| Why is a button missing? | Controls show only when the server would accept them; see the table under slice 3's delivered behavior. A task that used all 5 attempts says "All 5 attempts used" instead of offering Retry |
+| Why is a button missing? | Controls show only when the server would accept them; see the table under slice 3's delivered behavior. A task that used all 5 attempts says "All 5 attempts used" instead of offering Retry. While another run is active, an older run's Retry and Recover are hidden and its header names the active run |
 | Why did Copy not work? | The message next to the button ("Could not copy: …"); the console has `copy <what> failed: <error name>` |
-| Why was my plan not made? | The message under **Plan it** and, under it, each round's issues (the 422's `rounds`); the console has `POST /proposals/from-request answered 422` |
+| Why was my plan not made? | The message under **Plan it** and, under it, each round's issues (the 422's `rounds`); the console has `POST /proposals/from-request answered 422`. A run name already used is refused at once (409), before anything is billed |
 | Why was my hand-written plan refused? | The message under **Save the plan**: `not valid JSON: …` (never sent), the rule that broke (400) or the field errors (422) |
-| Why did Approve and start fail? | The `detail` under the form: a run already active (409), an unknown check or a missing folder (400) |
+| Why did Approve and start fail? | The `detail` under the form: a run already active (409), an unknown check or a missing folder (400). A hand-written plan's own `check:<name>` must be a check on the server too |
 | Did the app send my approve or reject? | The console's `POST /proposals/<id>/approve answered 202` or `.../reject answered 200`; the plan's status in **Plans** |
 | Why was my agent change refused? | The message under the form: the server's `detail` (a bad name, the last agent) or its field errors (a persona over 10,000 characters) |
 | Did the app save or remove my agent? | The console's `PUT /agents/<id> answered 200` or `DELETE /agents/<id> answered 200`; the server logs `api: agent <id> saved` / `removed` |
