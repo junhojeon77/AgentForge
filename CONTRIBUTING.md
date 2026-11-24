@@ -33,7 +33,7 @@ npm --prefix apps/desktop install
 ## Commands
 
 ```powershell
-.\.venv\Scripts\python.exe -m agentforge                      # five-worker mock demo, prints JSON report
+.\.venv\Scripts\python.exe -m agentforge                      # five-task mock demo, prints JSON report
 .\.venv\Scripts\python.exe -m agentforge setup                # copy default personas to %APPDATA%\AgentForge\agents
 .\.venv\Scripts\python.exe -m agentforge claude "<task>"       # one read-only Claude Code task (billed)
 .\.venv\Scripts\python.exe -m agentforge plan "<request>"      # lead agent: print a task plan (billed)
@@ -104,10 +104,11 @@ and say in the PR which documents changed.
 
 ## Code map
 
-The code is a library, not a service: immutable contracts, a deterministic in-memory async
-scheduler, mock workers, a Claude Code worker, Git worktrees, a command validator and editable
-agent personas and an optional SQLite run store, all in `apps/api/src/agentforge`. Without a store,
-state is lost when the process exits.
+The Python code in `apps/api/src/agentforge` is a library with a local REST API on top
+(`api.py`, started by `python -m agentforge serve`): immutable contracts, a deterministic
+in-memory async scheduler, mock workers, a Claude Code worker, Git worktrees, a command
+validator, editable agent personas, the lead agent and an optional SQLite run store. Without a
+store, state is lost when the process exits.
 
 - **`domain.py`: contracts.** Every model extends `Contract` (Pydantic, `frozen=True`,
   `extra="forbid"`, `revalidate_instances="always"`); collections are tuples. `Identifier` (ids,
@@ -126,7 +127,9 @@ state is lost when the process exits.
   (1–5, default 1) allows retries; `Assignment.previous_failure`, `TaskState.attempt_number`,
   `TaskAttempt.message` and `Transition.detail` record them. `Assignment.session_id` (chosen by
   the scheduler, kept on `TaskAttempt.session_id`) and `Assignment.resume` let an attempt stopped
-  by a pause be continued.
+  by a pause be continued. `Assignment.dependency_diffs` carries the diffs of the finished tasks
+  it waits for. `Proposal` is a plan waiting for a person; `Proposal.fixes` names the run whose
+  reviews it fixes.
 - **`orchestration.py`: `Scheduler`.** Two `Protocol` seams are where workers and validators plug
   in: `WorkerExecutor.execute(Assignment) -> WorkerResult` (mock or Claude Code) and
   `ResultValidator.validate(TaskSpec, WorkerResult) -> ValidationReport` (mock or
@@ -177,7 +180,7 @@ state is lost when the process exits.
     `_release_unstarted()` covers tasks cancelled before their coroutine's first step, where
     `finally` never runs.
 - **`mocks.py`: test doubles.** `DEFAULT_ROLES` lists backend, frontend, database, qa and
-  integration. The lead orchestrator is not a registered worker. `MockExecutor(gate=...,
+  integration, the roles the demo gives tasks to. The lead orchestrator is not a registered worker. `MockExecutor(gate=...,
   expected_starts=N)` provides a deterministic barrier: `started` fires after N assignments, and
   the executor blocks until the gate opens. `MockValidator` checks string evidence only:
   `expected_output` ⊆ artifacts, `acceptance_criteria` ⊆ satisfied criteria, and each
@@ -198,10 +201,11 @@ state is lost when the process exits.
   `--append-system-prompt`, the `WorkerResult` schema via `--json-schema`, and a
   `--max-budget-usd` cap. Every event goes to `on_event`; the final `result.structured_output`
   becomes the `WorkerResult`. On a retry the prompt also carries `previous_failure`, and a task
-  with finished dependencies their `dependency_diffs`, both labelled as data, not instructions. The session id comes from `Assignment.session_id`. With
-  `Assignment.resume` it runs `--resume <id>` and a short "continue" prompt instead; if the CLI
-  says it has no such session, it starts one fresh session in the same folder. An error result → `WORKER_FAILURE`, no result →
-  `EXECUTOR_EXCEPTION`, and cancellation kills the process. The CLI is usually not on PATH: pass
+  with finished dependencies their `dependency_diffs`, both labelled as data, not instructions.
+  The session id comes from `Assignment.session_id`. With `Assignment.resume` it runs
+  `--resume <id>` and a short "continue" prompt instead; if the CLI says it has no such
+  session, it starts one fresh session in the same folder. An error result → `WORKER_FAILURE`,
+  no result → `EXECUTOR_EXCEPTION`, and cancellation kills the process. The CLI is usually not on PATH: pass
   `command=(<path to the VS Code extension's claude.exe>,)`. A `.cmd`/`.bat` launcher is
   rejected, because cmd.exe would cut the multi-line persona. An output line that is not a JSON
   event is skipped with a WARNING (length only).
@@ -218,7 +222,7 @@ state is lost when the process exits.
   of a finished run on request; a folder Git does not know as a worktree is kept and named in
   the error.
 - **`store.py`: `RunStore`.** SQLite through SQLAlchemy Core: tables `runs`, `tasks`, `attempts`
-  and `transitions`. Contracts are stored as JSON and validated with Pydantic on load, so
+  and `transitions`, and since M5 `proposals` (migration `0002`). Contracts are stored as JSON and validated with Pydantic on load, so
   `domain.py` stays the one definition. Opening a store runs the Alembic migrations in
   `migrations/` (`env.py` uses the store's connection, or the URL in `apps/api/alembic.ini`
   when run from the command line). `Scheduler._record` calls `save()` on every transition;
@@ -252,10 +256,10 @@ state is lost when the process exits.
   as an asyncio task and turns an early `ValueError` into a 400) and the event-stream queues
   that `Scheduler(on_transition=...)` feeds. `_granted` applies the rights a person gives on
   approval; every task defaults to read-only. `_with_reviews` then adds a read-only
-  `review-<id>` task (role `REVIEW_ROLE`) after every task given `"edit"`, and logs their ids. `lead_plans` is the
-  one planning path for `POST /proposals/from-request` and `POST /runs/{id}/fix-plan`; the
-  latter builds its request from `_reviews(report)` with `_fix_request` and sets
-  `Proposal.fixes`. `serve` runs uvicorn on 127.0.0.1 only.
+  `review-<id>` task (role `REVIEW_ROLE`) after every task given `"edit"`, and logs their ids.
+  `lead_plans` is the one planning path for `POST /proposals/from-request` and
+  `POST /runs/{id}/fix-plan`; the latter builds its request from `_reviews(report)` with
+  `_fix_request` and sets `Proposal.fixes`. `serve` runs uvicorn on 127.0.0.1 only.
   Since M6: `_Server.agents()` reads `ApiSettings.agents` again for every plan check and run
   start (injected test workers skip it), so an edit applies from the next run; the agent routes
   are plain `def` so FastAPI runs their file I/O in a thread; `CORSMiddleware` allows only
@@ -304,9 +308,9 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   into `ApiError` with a `kind`: `no-token`, `offline`, `unauthorized` or `http` (with the
   server's `detail`; FastAPI's field errors become `field: message` lines, and the parsed body
   is kept as `ApiError.body`; `fieldErrors(error)` reads them back one by one). `request` is
-  `send` plus JSON; `jsonBody(body)` makes a JSON
-  request (POST unless a method is given). It logs every change it sends and every refusal as `<method> <path> answered <status>`,
-  never a body.
+  `send` plus JSON; `jsonBody(body)` makes a JSON request (POST unless a method is given). It
+  logs every change it sends and every refusal as `<method> <path> answered <status>`, never a
+  body.
 - **`src/api/events.ts`: `followEvents`.** It reads `GET /runs/{id}/events` with `fetch`, because
   `EventSource` cannot send the token, and parses the frames itself. After a drop or a lost
   server it waits and reconnects with `Last-Event-ID`; it stops at `end`, on abort, or on any

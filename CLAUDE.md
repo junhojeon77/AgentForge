@@ -4,9 +4,23 @@ This file gives instructions to AI coding assistants working on this project.
 
 ## Project Overview
 
-AgentForge is a planned local-first Windows platform where one lead agent coordinates specialized
-coding agents: seven by default (five that build, a reviewer and an auditor), and users can add, remove or fully customize any of them. M1–M5 (including the lead agent and the local REST API) are implemented in `apps/api/src/agentforge`. M6 (the desktop app, `apps/desktop`) is implemented: slice 1 (API additions), slice 2 (the app shell: token, API client, live events, connection states), slice 3 (the run screens: list, run page, controls, diff review, plain styling), slice 4 (the proposal screens: ask for something, plans, approve with rights, reject), slice 5 (the agent editor, and new agents the lead proposes with a plan, made only on approval), slice 6 (the visual design of the frame and the run screens, from `docs/design/agentforge`), slice 7 (the welcome screen, the plain or technical view and the tour) and slice 8 (the visual design of the remaining screens, from the design's second pass) are built. Since 2026-11-24 the reviewer and auditor agents ship as defaults, the approval adds a review task after every task given "edit" (the scheduler hands each task the diffs of the tasks it waits for), and the lead can plan fixes from a finished run's reviews; the audit after integration is a planned M7 slice. LangGraph and LangChain are used only for the lead agent and the Claude Code Runnable interface; keep scheduling, saved runs and recovery in plain code.
-Everything else is planned. Keep AI reasoning separate from deterministic scheduling, validation,
+AgentForge is a local-first Windows platform where one lead agent coordinates specialized coding
+agents: seven by default (five that build, a reviewer and an auditor), and users can add, remove
+or fully customize any of them. M1–M5 (including the lead agent and the local REST API) are
+implemented in `apps/api/src/agentforge`. M6 (the desktop app, `apps/desktop`) is implemented:
+slice 1 (API additions), slice 2 (the app shell: token, API client, live events, connection
+states), slice 3 (the run screens: list, run page, controls, diff review, plain styling), slice 4
+(the proposal screens: ask for something, plans, approve with rights, reject), slice 5 (the agent
+editor, and new agents the lead proposes with a plan, made only on approval), slice 6 (the visual
+design of the frame and the run screens, from `docs/design/agentforge`), slice 7 (the welcome
+screen, the plain or technical view and the tour) and slice 8 (the visual design of the remaining
+screens, from the design's second pass) are built. Since 2026-11-24 the reviewer and auditor
+agents ship as defaults, the approval adds a review task after every task given "edit" (the
+scheduler hands each task the diffs of the tasks it waits for), and the lead can plan fixes from a
+finished run's reviews; the audit after integration is a planned M7 slice. LangGraph and
+LangChain are used only for the lead agent and the Claude Code Runnable interface; keep
+scheduling, saved runs and recovery in plain code.
+Everything else (M7 and M8) is planned. Keep AI reasoning separate from deterministic scheduling, validation,
 permissions and human approval.
 
 **Who it is for:** people who do not code ask for something in plain words, the lead agent plans

@@ -18,23 +18,25 @@ cancel, retry or recover work, and starts runs: ask for something in plain words
 the lead agent's plan with the rights each task gets, and edits your team of agents (the lead
 agent can propose a new one with a plan). Every screen follows the visual design (dark when
 Windows is dark). On first start a welcome screen explains the app, asks for the plain or
-technical view and offers a short tour.
+technical view and offers a short tour. Every change a task makes is reviewed by the reviewer
+agent, and the lead agent can plan fixes from those reviews.
 
 ## What is AgentForge
 
-AgentForge is a planned Windows desktop platform for coordinating software development agents. A
+AgentForge is a local-first Windows desktop platform for coordinating software development agents. A
 lead agent breaks a request into tasks, and specialized workers carry them out under deterministic
 control and human approval. Seven agents come by default: five that build (backend, frontend,
 database, QA and integration), a reviewer that checks every change, and an auditor that reviews a
 whole repository. The team is yours to shape: add or remove agents, and set each one's role, model,
 reasoning level and persona. At most five run at once.
 
-What exists today is the core library (`apps/api/src/agentforge`):
+It has three parts: the core library (`apps/api/src/agentforge`), a local REST API on top of it
+(step 9 below) and the desktop app (`apps/desktop`, step 10). The library holds:
 
 - **Contracts:** immutable task, worker, result and report models.
 - **Scheduler:** a deterministic, in-memory async scheduler that runs a task graph on up to five
   workers at once.
-- **Workers:** five mock workers for demos and tests, plus a worker that runs the Claude Code
+- **Workers:** mock workers for demos and tests, plus a worker that runs the Claude Code
   CLI. It is read-only unless a task allows edits, and runs no commands unless a task lets it
   run its own check commands.
 - **Worktrees:** each task can get its own Git worktree, and its diff is recorded.
@@ -100,14 +102,14 @@ flowchart LR
   lead agent can plan the fixes; that plan waits for your approval like any other.
 
 A run can be saved to SQLite and recovered after a restart; without a store it lives in memory only.
-What is built and what is planned (the API and the desktop app) is in
-[ROADMAP.md](ROADMAP.md).
+What is built and what is planned is in [ROADMAP.md](ROADMAP.md).
 
 ## Prerequisites
 
 - Windows with PowerShell
 - Python 3.11 or newer
-- Git, to clone the repository
+- Git, to clone the repository and for the worktrees workers edit in
+- For the desktop app only: Node.js and Rust (with the MSVC build tools Tauri requires)
 - For real (non-mock) workers only: Claude Code installed and logged in. The VS Code extension
   bundles `claude.exe`. An npm install's `claude.cmd` launcher is rejected; pass the path to
   `claude.exe`.
@@ -315,8 +317,9 @@ with the rights each task gets, then approve each worker's diff before its check
 follow it all on `GET /runs/{id}/events`. Every task you let edit gets a `review-<id>` task
 after it (the team needs an agent with role `reviewer`). Once a run has finished,
 `POST /runs/{id}/fix-plan` has the lead agent plan fixes for what its reviews say must be fixed
-(billed; only reviews with "Must fix" findings count). `GET /runs`, `GET /proposals` and `GET /checks` list
-what is there, and the agent routes are under [Agents and personas](#agents-and-personas).
+(billed; only reviews with "Must fix" findings count). `GET /runs`, `GET /proposals` and
+`GET /checks` list what is there, and the agent routes are under
+[Agents and personas](#agents-and-personas).
 Endpoints and limits are in [the M5 doc](docs/milestones/M5-api.md) and
 [the M6 doc](docs/milestones/M6-desktop.md).
 
@@ -348,8 +351,8 @@ then **Approve and start**; or reject it with a reason. After each task you let 
 reviewer checks its change, and its report shows on the run's page. When a review of a finished
 run found something that must be fixed, **Plan fixes from the reviews** asks you first (it is
 billed), then asks the lead agent for a plan that fixes it; the plan opens under **Plans** for
-your OK. Developers can write the plan as JSON
-instead, and set attempts and time limits under **More options**.
+your OK. Developers can write the plan as JSON instead, and set attempts and time limits under
+**More options**.
 
 **Your team** lists your agents: add one, change its role or how it should work (model and
 reasoning are under **More options**), or remove it; changes apply from the next run. When no
@@ -423,7 +426,11 @@ propose a new agent with a plan, made only when a person approves it.
   outcome mapping, the live check, the timeout and the `claude` command.
 - [M3: worktrees and validation](docs/milestones/M3-worktrees.md): worktrees, edit mode, diffs,
   check commands, risks and deferred work.
+- [M4: retries, pause/resume, saved runs and the lead agent](docs/milestones/M4-orchestration.md):
+  retry rules, pause and resume, saved runs, the lead agent, how to debug a run, limits and
+  deferred work.
 - [M5: local REST API, approvals and live events](docs/milestones/M5-api.md): endpoints,
-  approvals, the token, how to debug a run and limits.
-- [M4: retries, pause/resume, saved runs and the lead agent](docs/milestones/M4-orchestration.md): retry rules, pause and
-  resume, how to debug a run, limits and the M4 parts still planned.
+  approvals, the token, reviews and fix plans, how to debug a run and limits.
+- [M6: desktop dashboard](docs/milestones/M6-desktop.md): the app's screens slice by slice, its
+  contract additions, how to debug it and limits.
+- [docs/design/agentforge](docs/design/agentforge/README.md): the visual design the app follows.

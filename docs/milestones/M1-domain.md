@@ -122,6 +122,7 @@ Run the pytest and Ruff commands in the root README. Tests cover:
 - Worker reassignment during cancellation cleanup, complete transition history, and empty plans.
 - A smoke test of the `python -m agentforge` demonstration.
 
-The executable `python -m agentforge` demonstrates all five workers concurrently with validated mock
-evidence. No real commands, model calls, repository writes, SQLite database, FastAPI server, LangGraph
-runtime, desktop UI, or production security sandbox is included.
+The executable `python -m agentforge` demonstrates five workers running at once with validated
+mock evidence. M1 itself had no real commands, model calls, repository writes, SQLite database,
+FastAPI server, LangGraph runtime or desktop UI; M2 to M6 added them. There is still no
+production security sandbox.

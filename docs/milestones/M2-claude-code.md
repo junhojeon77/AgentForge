@@ -7,8 +7,10 @@
 
 `agentforge.claude_code.ClaudeCodeExecutor` is a `WorkerExecutor` that runs one Claude Code CLI
 process per task (`claude -p`) and turns its reply into a `WorkerResult`. It plugs into the M1
-`Scheduler` unchanged: register it for any role with `register_worker`. Workers are read-only. They
-can read, search and list files in the task's workspace, but they cannot edit files or run commands.
+`Scheduler` unchanged: register it for any role with `register_worker`. In M2 workers are
+read-only: they can read, search and list files in the task's workspace, but they cannot edit
+files or run commands. [M3](M3-worktrees.md) added edit mode and a worker's own checks, both
+only for tasks that allow them.
 
 Agents are fully customizable. `agentforge.personas` keeps each agent as one editable Markdown file.
 You can add an agent with any id and role, remove any agent (the defaults included), and change

@@ -37,8 +37,9 @@ SQLAlchemy and Alembic were added for M4's persistence, and LangGraph and LangCh
 lead agent, and FastAPI and uvicorn for M5, on 2026-11-15. For M6's shell, on 2026-11-18: Tauri 2
 with `tauri-plugin-fs`, React, TypeScript, Vite, Tailwind, TanStack Query and Vitest. shadcn/ui
 waits for a screen that needs a composite widget (slices 3 to 8 used native elements, slice 6's
-side-list tabs, slice 7's tour dialog and slice 8's folds and rights table included), and Zustand for a screen that needs shared client state. Add each only when
-its milestone is approved.
+side-list tabs, slice 7's tour dialog and slice 8's folds and rights table included), and
+Zustand for a screen that needs shared client state. Add each only when its milestone is
+approved.
 
 ## Deferred from built milestones
 
@@ -57,7 +58,9 @@ are in the [M5 doc](docs/milestones/M5-api.md#not-implemented-yet).
 From M6: a command-line option for allowed origins. Details are in the
 [M6 doc](docs/milestones/M6-desktop.md#not-implemented-yet).
 
-## Guidance for planned milestones
+## Guidance
+
+These rules hold for the built milestones and for the planned ones.
 
 - **Model and execution runtime:** the Claude Code CLI sits behind the
   `WorkerExecutor` seam (`claude_code.py`). Verify flags, event shapes, auth and interruption

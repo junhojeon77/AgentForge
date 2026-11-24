@@ -219,7 +219,7 @@ accepted it on the first round. Two sessions, $0.004.
 | `RunStore(path)` | Opens or creates the SQLite file and migrates it. `start_run(plan)`, `save(...)`, `load(run_id)` (the plan and the report without workers, or `None`) and `unfinished_runs()` (ids, oldest first). `agentforge.store.default_path()` is `%APPDATA%\AgentForge\runs.db` |
 | `Scheduler(..., store=None)` | With a store, `run()` saves every transition. A run id is saved once: `run()` with an id already saved raises `ValueError` before anything starts |
 | `await recover(run_id)` | Continues a saved, unfinished run and returns its report. Raises `ValueError` without a store, for an unknown or finished run, while a run is active, or when an unfinished attempt's worker is not registered |
-| Database tables | `runs` (the plan as JSON), `tasks` (`TaskState` as JSON, plus its status), `attempts` (`TaskAttempt` as JSON, in dispatch order), `transitions` (sequence, task, status, detail). JSON is checked with the same Pydantic contracts on load |
+| Database tables | `runs` (the plan as JSON), `tasks` (`TaskState` as JSON, plus its status), `attempts` (`TaskAttempt` as JSON, in dispatch order), `transitions` (sequence, task, status, detail). JSON is checked with the same Pydantic contracts on load. [M5](M5-api.md) added `proposals` (migration `0002`) |
 
 ## How to debug a run
 
@@ -345,9 +345,8 @@ Run the pytest and Ruff commands in the root README. The M4 tests cover:
   way a task can be cancelled), and the log lines without the failure text.
 - `test_scheduler.py`, pause/resume: a running task continuing the same attempt and session id,
   a waiting task held while its dependents wait, a pause during validation rerunning only the
-  validation, `pause_run`/`resume_run` leaving a hand-paused task paused in both orders,
-  resume on the worker
-  that started the attempt, cancelling a paused task, pausing finished and unknown tasks, a late
+  validation, `pause_run`/`resume_run` leaving a hand-paused task paused in both orders, resume
+  on the worker that started the attempt, cancelling a paused task, pausing finished and unknown tasks, a late
   error from a stopped worker, a resume that arrives while the paused worker is still stopping,
   a pause while waiting for a retry, and the log lines.
 - `test_contracts.py`: the bounds of `max_attempts`, ids, roles and titles rejecting control
