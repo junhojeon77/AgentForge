@@ -326,6 +326,7 @@ describe("hasReviews", () => {
         failure_reason: null,
         message: "",
         attempt_number: 1,
+        worker_id: null,
       },
     ],
     attempts: [
@@ -337,6 +338,8 @@ describe("hasReviews", () => {
         failure_reason: null,
         message: "",
         result: { message, diff: "" },
+        started_at: null,
+        stopped_at: null,
       },
     ],
   });

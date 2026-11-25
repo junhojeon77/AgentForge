@@ -30,6 +30,7 @@ export interface TaskState {
   failure_reason: string | null;
   message: string;
   attempt_number: number;
+  worker_id: string | null; // the agent on the task now; null while it rests
 }
 
 export interface TaskAttempt {
@@ -40,6 +41,9 @@ export interface TaskAttempt {
   failure_reason: string | null;
   message: string;
   result: { message: string; diff: string } | null;
+  // ISO times; null on attempts saved before slice 9. stopped_at is null while it works.
+  started_at: string | null;
+  stopped_at: string | null;
 }
 
 export interface RunReport {

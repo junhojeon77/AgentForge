@@ -11,16 +11,19 @@ import {
   type Guide,
   loadGuide,
   saveGuide,
+  setRunView,
+  setTheme,
   setView,
   showAgain,
 } from "./guide";
 import { Icon, type IconName } from "./Icon";
 import { NewProposal, PLAN_GROUP, ProposalPage, STATUS } from "./ProposalPage";
-import type { Proposal } from "./proposals";
+import { proposalsQuery } from "./proposals";
 import { RunPage, runQuery } from "./RunPage";
 import {
   Button,
   CopyButton,
+  LABEL,
   NeedsCount,
   plural,
   problem,
@@ -84,16 +87,20 @@ export function App() {
     setGuide(next);
     saveGuide(() => globalThis.localStorage, next);
   };
+  // Before the welcome's early return, so it starts in the saved theme too; a layout effect,
+  // so the first paint already has it.
+  useLayoutEffect(() => {
+    if (guide.theme === "light") document.documentElement.dataset.theme = "light";
+    else delete document.documentElement.dataset.theme;
+  }, [guide.theme]);
   const list = useRef<HTMLDivElement>(null);
   const scrolls = useRef<Record<Tab, number>>({ runs: 0, plans: 0 });
   const shown = STATES[state];
   const connected = state === "connected" ? runs : undefined;
   const active = connected?.active ?? null;
   const proposals = useQuery({
-    queryKey: ["proposals"],
-    queryFn: () => client.request<{ proposals: Proposal[] }>("/proposals"),
+    ...proposalsQuery(client),
     refetchInterval: POLL_MS,
-    retry: false,
     enabled: connected !== undefined,
   });
   // The active run's diffs waiting for review, for its count in the side list.
@@ -156,7 +163,7 @@ export function App() {
         <Welcome
           view={guide.view}
           onView={(view) => keep(setView(guide, view))}
-          onDone={(takeTour) => keep(finishWelcome(guide.view, takeTour))}
+          onDone={(takeTour) => keep(finishWelcome(guide, takeTour))}
         />
       </div>
     );
@@ -172,7 +179,7 @@ export function App() {
           role="status"
           aria-live="polite"
           title={shown.text + suffix}
-          className="flex min-w-0 items-center gap-2 text-control font-semibold"
+          className="flex min-w-0 items-center gap-2 font-mono text-[12px] leading-4"
         >
           <Icon name={shown.icon} className={`size-4 shrink-0 ${shown.iconTone}`} />
           <span className="truncate">
@@ -266,10 +273,10 @@ export function App() {
                         >
                           <SideId>{id}</SideId>
                           {id === connected.active ? (
-                            <StatusBadge group="working" label="Active" />
+                            <StatusBadge small group="working" label="Active" />
                           ) : (
                             connected.unfinished.includes(id) && (
-                              <StatusBadge group="needs" label="Interrupted" />
+                              <StatusBadge small group="needs" label="Interrupted" />
                             )
                           )}
                           {id === connected.active && (
@@ -297,7 +304,11 @@ export function App() {
                           onClick={() => show({ kind: "proposal", id: p.id })}
                         >
                           <SideId>{p.id}</SideId>
-                          <StatusBadge group={PLAN_GROUP[p.status]} label={STATUS[p.status]} />
+                          <StatusBadge
+                            small
+                            group={PLAN_GROUP[p.status]}
+                            label={STATUS[p.status]}
+                          />
                         </SideItem>
                       </li>
                     ))}
@@ -308,11 +319,14 @@ export function App() {
             <ViewFooter
               view={guide.view}
               onView={(view) => keep(setView(guide, view))}
+              theme={guide.theme}
+              onTheme={(theme) => keep(setTheme(guide, theme))}
               onShowAgain={() => keep(showAgain(guide))}
             />
           </nav>
           <main className="min-w-0 flex-1 overflow-y-auto p-6">
-            <div className="max-w-280">
+            {/* A run page sets its own widths, so the board's ground can fill the main area. */}
+            <div className={view.kind === "run" ? "min-h-full" : "max-w-280"}>
               {view.kind === "run" ? (
                 <RunPage
                   key={view.id}
@@ -324,6 +338,8 @@ export function App() {
                   }
                   otherRun={connected.active !== view.id ? connected.active : null}
                   onOpenPlan={(id) => show({ kind: "proposal", id })}
+                  runView={guide.runView}
+                  onRunView={(runView) => keep(setRunView(guide, runView))}
                 />
               ) : view.kind === "agents" ? (
                 <AgentsPage client={client} />
@@ -394,7 +410,7 @@ function Disconnected({ busy, onReconnect }: { busy: boolean; onReconnect: () =>
 
 function ListHeading({ label, count }: { label: string; count: number }) {
   return (
-    <p className="flex justify-between px-2 pt-1 pb-2 text-meta font-semibold text-ink-muted">
+    <p className={`flex justify-between px-2 pt-1 pb-2 ${LABEL}`}>
       <span>{label}</span>
       <span className="tabular-nums">{count}</span>
     </p>

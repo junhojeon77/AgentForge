@@ -1,10 +1,14 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { agentsQuery } from "./agents";
 import { ApiError, type Client } from "./api/client";
 import { followEvents, type Transition } from "./api/events";
+import { RunBoard } from "./RunBoard";
+import { countWords } from "./board";
+import type { RunView } from "./guide";
 import { Icon } from "./Icon";
 import { log } from "./log";
-import { newRunId, planFixes } from "./proposals";
+import { newRunId, planFixes, proposalsQuery } from "./proposals";
 import {
   attemptStartsOpen,
   type DiffTone,
@@ -29,11 +33,15 @@ import {
 } from "./runs";
 import {
   Alert,
+  atBottom,
   type BadgeGroup,
   Button,
+  Code,
   Confirm,
   CopyButton,
   FIELD,
+  LABEL,
+  Meta,
   plural,
   problem,
   ReasonForm,
@@ -118,26 +126,6 @@ function Refusal({ control, object }: { control: ControlState; object: string })
   );
 }
 
-function Code({ children }: { children: ReactNode }) {
-  return <code className="font-mono">{children}</code>;
-}
-
-/** A `meta` line: items joined by " · ", empty ones left out. */
-function Meta({ items, className = "" }: { items: ReactNode[]; className?: string }) {
-  const shown = items.filter(Boolean);
-  return (
-    <span className={`text-meta text-ink-muted wrap-anywhere ${className}`}>
-      {shown.map((item, i) => (
-        // Items never move, so their position is a stable key.
-        <Fragment key={i}>
-          {i > 0 && " · "}
-          {item}
-        </Fragment>
-      ))}
-    </span>
-  );
-}
-
 export function RunPage({
   client,
   runId,
@@ -145,6 +133,8 @@ export function RunPage({
   interrupted,
   otherRun,
   onOpenPlan,
+  runView,
+  onRunView,
 }: {
   client: Client;
   runId: string;
@@ -153,10 +143,16 @@ export function RunPage({
   /** Another run that is active; this one cannot be reopened until it ends. */
   otherRun: string | null;
   onOpenPlan: (id: string) => void;
+  runView: RunView;
+  onRunView: (view: RunView) => void;
 }) {
   const queryClient = useQueryClient();
   const report = useQuery(runQuery(client, runId));
+  const proposals = useQuery(proposalsQuery(client));
+  const agents = useQuery(agentsQuery(client));
   const [stopped, setStopped] = useState<string | null>(null);
+  // The task open in the drawer, and whether it opened at its review band.
+  const [drawer, setDrawer] = useState<{ task: string; review: boolean } | null>(null);
 
   useEffect(() => {
     if (!live) return;
@@ -176,54 +172,213 @@ export function RunPage({
 
   const run = report.data;
   const state: RunState = live ? "Active" : interrupted ? "Interrupted" : "Finished";
+  const otherActive = otherRun !== null;
+  const card = (task: TaskState) => (
+    <TaskCard
+      client={client}
+      runId={runId}
+      live={live}
+      otherActive={otherActive}
+      state={task}
+      attempts={run?.attempts.filter((a) => a.task_id === task.task.id) ?? []}
+    />
+  );
+  const opened = drawer && run?.tasks.find((t) => t.task.id === drawer.task);
+  const fixes = run && state === "Finished" && hasReviews(run) && (
+    <FixPlan client={client} runId={runId} onOpenPlan={onOpenPlan} />
+  );
 
   return (
-    <section aria-labelledby="run-title" className="space-y-6">
-      <RunHeader client={client} runId={runId} state={state} run={run} otherRun={otherRun} />
-      {live && stopped && (
-        <Alert
-          tone="needs"
-          title="Live updates stopped:"
-          text={`${stopped}. What you see may be out of date.`}
-        />
-      )}
-      {report.error && (
-        <Alert title={`Could not load run ${runId}:`} text={problem(report.error)}>
-          <Button small onClick={() => void report.refetch()}>
-            Try again
-          </Button>
-        </Alert>
-      )}
-      {!run ? (
-        !report.error && <Loading />
-      ) : (
-        <>
-          <section aria-labelledby="tasks-title" className="space-y-3">
-            <h2 id="tasks-title" className="text-section font-semibold">
-              Tasks · {run.tasks.length}
-            </h2>
-            {/* The plan's order: live updates never move what the person is reading. */}
-            <ul className="space-y-3">
-              {run.tasks.map((task) => (
-                <TaskCard
-                  key={task.task.id}
-                  client={client}
-                  runId={runId}
-                  live={live}
-                  otherActive={otherRun !== null}
-                  state={task}
-                  attempts={run.attempts.filter((a) => a.task_id === task.task.id)}
-                />
-              ))}
-            </ul>
-          </section>
-          {state === "Finished" && hasReviews(run) && (
-            <FixPlan client={client} runId={runId} onOpenPlan={onOpenPlan} />
-          )}
-          <History transitions={run.transitions} tasks={run.tasks.map((t) => t.task.id)} />
-        </>
+    <section aria-labelledby="run-title" className="flex min-h-full flex-col">
+      <div className="max-w-280 space-y-6">
+        <RunHeader client={client} runId={runId} state={state} run={run} otherRun={otherRun} />
+        {live && stopped && (
+          <Alert
+            tone="needs"
+            title="Live updates stopped:"
+            text={`${stopped}. What you see may be out of date.`}
+          />
+        )}
+        {report.error && (
+          <Alert title={`Could not load run ${runId}:`} text={problem(report.error)}>
+            <Button small onClick={() => void report.refetch()}>
+              Try again
+            </Button>
+          </Alert>
+        )}
+        {!run && !report.error && <Loading />}
+        {runView === "board" && fixes}
+      </div>
+      {run &&
+        (runView === "board" ? (
+          <RunBoard
+            run={run}
+            runId={runId}
+            live={live}
+            proposal={proposals.data?.proposals.find((p) => p.id === runId)}
+            agents={agents.data?.agents}
+            onOpenPlan={onOpenPlan}
+            onOpenTask={(task, review) => setDrawer({ task, review })}
+            controls={(task, extra) => (
+              <TileControls
+                client={client}
+                runId={runId}
+                live={live}
+                otherActive={otherActive}
+                state={task}
+              >
+                {extra}
+              </TileControls>
+            )}
+          />
+        ) : (
+          <div className="max-w-280 space-y-6 pt-6 pb-22">
+            <section aria-labelledby="tasks-title" className="space-y-3">
+              <h2
+                id="tasks-title"
+                className="flex flex-wrap items-baseline gap-x-2 text-section font-semibold"
+              >
+                Tasks <span className={LABEL}>{tasksLabel(run.tasks)}</span>
+              </h2>
+              {/* The plan's order: live updates never move what the person is reading. */}
+              <ul className="space-y-3">
+                {run.tasks.map((task) => (
+                  <li key={task.task.id}>{card(task)}</li>
+                ))}
+              </ul>
+            </section>
+            {fixes}
+            <History transitions={run.transitions} tasks={run.tasks.map((t) => t.task.id)} />
+          </div>
+        ))}
+      {run && <BoardBar view={runView} onView={onRunView} counts={countWords(run.tasks)} />}
+      {opened && drawer && (
+        <TaskDrawer
+          key={opened.task.id}
+          state={opened}
+          review={drawer.review}
+          onClose={() => setDrawer(null)}
+        >
+          {card(opened)}
+        </TaskDrawer>
       )}
     </section>
+  );
+}
+
+/** "4 · 1 waits for you", after the Tasks heading. */
+function tasksLabel(tasks: TaskState[]): string {
+  const waits = tasks.filter((t) => t.status === "AWAITING_APPROVAL").length;
+  return `${tasks.length}${waits ? ` · ${waits} ${waits === 1 ? "waits" : "wait"} for you` : ""}`;
+}
+
+/** The pill at the foot of the run page: Board or List (remembered with the view), and the
+ * task counts in words. */
+function BoardBar({
+  view,
+  onView,
+  counts,
+}: {
+  view: RunView;
+  onView: (view: RunView) => void;
+  counts: string;
+}) {
+  const name = useId();
+  return (
+    // Sticky in the main area's scroll; the page keeps 88px at its foot so nothing hides under it.
+    <div className="pointer-events-none sticky bottom-4 z-10 -mt-16 flex justify-center">
+      <div
+        role="group"
+        aria-label="View and counts"
+        className="pointer-events-auto flex max-w-[calc(100%-32px)] flex-wrap items-center gap-3 rounded-full border border-line-strong bg-surface py-1 pr-3 pl-1"
+      >
+        <div
+          role="radiogroup"
+          aria-label="Show the run as"
+          className="inline-flex rounded-full border border-line bg-code-bg p-0.5"
+        >
+          {(["board", "list"] as const).map((v) => (
+            <label
+              key={v}
+              className="relative inline-flex h-[26px] cursor-pointer items-center rounded-full px-3 text-[12px] font-semibold text-ink-muted has-checked:bg-selected has-checked:text-ink has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus"
+            >
+              <input
+                type="radio"
+                name={name}
+                checked={view === v}
+                onChange={() => onView(v)}
+                className="absolute inset-0 m-0 cursor-pointer opacity-0"
+              />
+              {v === "board" ? "Board" : "List"}
+            </label>
+          ))}
+        </div>
+        {counts && <span className={LABEL}>{counts}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** One task over the board: the List view's own card, in a modal dialog with a see-through
+ * backdrop, so the board stays in sight and keeps updating. */
+function TaskDrawer({
+  state,
+  review,
+  onClose,
+  children,
+}: {
+  state: TaskState;
+  review: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const { task } = state;
+  // Taken at the first render, not in the effect: StrictMode runs effects twice in development,
+  // and by the second run the focus is already inside the drawer.
+  const [before] = useState(() => document.activeElement);
+
+  useLayoutEffect(() => {
+    const box = dialog.current;
+    if (box && !box.open) box.showModal();
+    // Review diff lands on the review band's first button; Open task on the card's title.
+    const band = review ? box?.querySelector<HTMLElement>("[data-review-band]") : null;
+    if (band) {
+      band.scrollIntoView({ block: "start" });
+      band.querySelector<HTMLElement>("button")?.focus();
+    } else {
+      box?.querySelector<HTMLElement>("[data-card-title]")?.focus();
+    }
+    return () => {
+      // Back to the button that opened it. Deferred: while the modal is still in the page,
+      // everything outside it is inert.
+      if (before instanceof HTMLElement) setTimeout(() => before.isConnected && before.focus());
+    };
+  }, [review, before]);
+
+  return (
+    <dialog
+      ref={dialog}
+      aria-label={`Task ${task.id}`}
+      // Esc closes the dialog and so does Close, so `close` is the one way out.
+      onClose={onClose}
+      className="task-drawer"
+    >
+      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-panel py-2 pr-2 pl-4">
+        <h2 title={task.title} className="min-w-0 flex-1 truncate text-body font-semibold">
+          Task <Code>{task.id}</Code> · {task.title}
+        </h2>
+        <Button
+          kind="ghost"
+          small
+          aria-label={`Close task ${task.id}`}
+          onClick={() => dialog.current?.close()}
+        >
+          Close
+        </Button>
+      </div>
+      <div className="p-4">{children}</div>
+    </dialog>
   );
 }
 
@@ -417,7 +572,6 @@ function TaskCard({
   const doing = busy ? control.variables?.action : undefined;
   const send = (action: TaskAction, reason?: string) =>
     control.mutate({ action, task: task.id, reason });
-  const actions = taskActions(status, live, state.attempt_number, otherActive);
   const checks = task.execution_constraints
     .filter((c) => c.startsWith("check:"))
     .map((c) => c.slice("check:".length));
@@ -428,21 +582,29 @@ function TaskCard({
   const banded = reviewAttempt(state, live, attempts);
   // A review refusal shows in the band only while the band is on screen.
   const inBand = reviewing && banded !== null;
-  const finished = status === "FAILED" || status === "CANCELLED";
   const newestFirst = [...attempts].sort((a, b) => b.number - a.number);
 
   return (
-    <li
+    <article
       aria-labelledby={titleId}
-      className={`rounded-lg bg-surface p-4 ${waiting ? "border-2 border-needs-edge" : "border border-line"}`}
+      className={`rounded-lg bg-surface ${waiting ? "border-2 border-needs-edge" : "border border-line"}`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <h3 id={titleId} className="min-w-0 text-section font-semibold wrap-anywhere">
+      {/* The title strip, like a terminal window's bar. */}
+      <div
+        className={`flex items-start justify-between gap-3 border-b border-line bg-code-bg px-4 py-2 ${waiting ? "rounded-t-[8px]" : "rounded-t-[9px]"}`}
+      >
+        <h3
+          id={titleId}
+          tabIndex={-1}
+          data-card-title
+          className="min-w-0 text-body font-semibold wrap-anywhere"
+        >
           {task.title}
         </h3>
         <StatusBadge {...STATUS[status]} />
       </div>
-      <p className="mt-1">
+      <div className="px-4 pt-3 pb-4">
+      <p>
         <Meta
           items={[
             <>
@@ -479,62 +641,13 @@ function TaskCard({
       {state.message && (
         <p className="mt-2 whitespace-pre-wrap wrap-anywhere">Note: {state.message}</p>
       )}
-      {(finished || actions.some((a) => a !== "approve" && a !== "reject")) && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {actions.includes("pause") && (
-            <Button
-              small
-              icon="held"
-              aria-label={`Pause task ${task.id}`}
-              disabled={busy}
-              busy={doing === "pause"}
-              onClick={() => send("pause")}
-            >
-              Pause
-            </Button>
-          )}
-          {actions.includes("resume") && (
-            <Button
-              small
-              icon="resume"
-              aria-label={`Resume task ${task.id}`}
-              disabled={busy}
-              busy={doing === "resume"}
-              onClick={() => send("resume")}
-            >
-              Resume
-            </Button>
-          )}
-          {actions.includes("retry") && (
-            <Button
-              small
-              icon="retry"
-              aria-label={`Retry task ${task.id}`}
-              disabled={busy}
-              busy={doing === "retry"}
-              onClick={() => send("retry")}
-            >
-              Retry
-            </Button>
-          )}
-          {finished && (
-            <span className="text-meta text-ink-muted">{retriesLeft(state.attempt_number)}</span>
-          )}
-          {actions.includes("cancel") && (
-            <Confirm
-              label="Cancel"
-              name={`Cancel task ${task.id}`}
-              icon="cancel"
-              small
-              question={`Stop task ${task.id}? Its worker stops now; you can retry it.`}
-              keep="Keep it"
-              disabled={busy}
-              busy={doing === "cancel"}
-              onConfirm={() => send("cancel")}
-            />
-          )}
-        </div>
-      )}
+      <TaskControls
+        state={state}
+        live={live}
+        otherActive={otherActive}
+        control={control}
+        className="mt-3"
+      />
       {!inBand && (
         <div className="mt-2">
           <Refusal control={control} object={`task ${task.id}`} />
@@ -571,7 +684,133 @@ function TaskCard({
           })}
         </div>
       )}
-    </li>
+      </div>
+    </article>
+  );
+}
+
+/** A task's own buttons (Pause, Resume, Retry, Cancel) as its card shows them; the board's tiles
+ * use them too, with `children` (Review diff, Open task) after them. */
+function TaskControls({
+  state,
+  live,
+  otherActive,
+  control,
+  left = true,
+  className = "",
+  children,
+}: {
+  state: TaskState;
+  live: boolean;
+  otherActive: boolean;
+  control: ControlState;
+  /** Say how many attempts are left beside Retry; a tile's foot has no room for it. */
+  left?: boolean;
+  className?: string;
+  children?: ReactNode;
+}) {
+  const { task, status } = state;
+  const busy = control.isPending;
+  const doing = busy ? control.variables?.action : undefined;
+  const send = (action: TaskAction) => control.mutate({ action, task: task.id });
+  const actions = taskActions(status, live, state.attempt_number, otherActive);
+  const finished = status === "FAILED" || status === "CANCELLED";
+  if (!children && !finished && !actions.some((a) => a !== "approve" && a !== "reject")) {
+    return null;
+  }
+  return (
+    <div className={`flex flex-wrap items-center gap-2 ${className}`}>
+      {actions.includes("pause") && (
+        <Button
+          small
+          icon="held"
+          aria-label={`Pause task ${task.id}`}
+          disabled={busy}
+          busy={doing === "pause"}
+          onClick={() => send("pause")}
+        >
+          Pause
+        </Button>
+      )}
+      {actions.includes("resume") && (
+        <Button
+          small
+          icon="resume"
+          aria-label={`Resume task ${task.id}`}
+          disabled={busy}
+          busy={doing === "resume"}
+          onClick={() => send("resume")}
+        >
+          Resume
+        </Button>
+      )}
+      {actions.includes("retry") && (
+        <Button
+          small
+          icon="retry"
+          aria-label={`Retry task ${task.id}`}
+          disabled={busy}
+          busy={doing === "retry"}
+          onClick={() => send("retry")}
+        >
+          Retry
+        </Button>
+      )}
+      {finished && left && (
+        <span className="text-meta text-ink-muted">{retriesLeft(state.attempt_number)}</span>
+      )}
+      {actions.includes("cancel") && (
+        <Confirm
+          label="Cancel"
+          name={`Cancel task ${task.id}`}
+          icon="cancel"
+          small
+          question={`Stop task ${task.id}? Its worker stops now; you can retry it.`}
+          keep="Keep it"
+          disabled={busy}
+          busy={doing === "cancel"}
+          onConfirm={() => send("cancel")}
+        />
+      )}
+      {children}
+    </div>
+  );
+}
+
+/** A tile's buttons, with their own pending state and refusal, as a card has. */
+function TileControls({
+  client,
+  runId,
+  live,
+  otherActive,
+  state,
+  children,
+}: {
+  client: Client;
+  runId: string;
+  live: boolean;
+  otherActive: boolean;
+  state: TaskState;
+  children: ReactNode;
+}) {
+  const control = useControl(client, runId);
+  return (
+    <>
+      <TaskControls
+        state={state}
+        live={live}
+        otherActive={otherActive}
+        control={control}
+        left={false}
+      >
+        {children}
+      </TaskControls>
+      {control.error && (
+        <div className="basis-full">
+          <Refusal control={control} object={`task ${state.task.id}`} />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -723,6 +962,7 @@ function ReviewBand({
   return (
     <div
       role="group"
+      data-review-band
       aria-label={`Review the diff for task ${taskId}`}
       className="-mx-4 space-y-2 border-t-2 border-needs-edge bg-needs-soft px-4 pt-3 pb-4 text-needs-ink"
     >
@@ -776,8 +1016,6 @@ function ReviewBand({
   );
 }
 
-const atBottom = (box: HTMLElement) => box.scrollHeight - box.scrollTop - box.clientHeight < 2;
-
 function History({ transitions, tasks }: { transitions: Transition[]; tasks: string[] }) {
   const [only, setOnly] = useState("");
   const box = useRef<HTMLDivElement>(null);
@@ -830,7 +1068,7 @@ function History({ transitions, tasks }: { transitions: Transition[]; tasks: str
           className="max-h-[360px] overflow-auto rounded-md border border-line bg-surface"
         >
           <table className="w-full border-collapse text-left text-[13px]">
-            <thead className="sticky top-0 bg-panel text-meta font-semibold text-ink-muted">
+            <thead className={`sticky top-0 bg-panel ${LABEL}`}>
               <tr>
                 <th scope="col" className="px-3 py-2 text-right">
                   #

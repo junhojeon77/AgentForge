@@ -1,3 +1,4 @@
+import { queryOptions } from "@tanstack/react-query";
 import { type Client, jsonBody } from "./api/client";
 
 export const REASONING = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -21,6 +22,15 @@ export function toId(name: string): string {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
+
+/** The team (`GET /agents`): the agents the next run gets. Your team, Ask for something and the run
+ * board share it. */
+export const agentsQuery = (client: Pick<Client, "request">) =>
+  queryOptions({
+    queryKey: ["agents"],
+    queryFn: () => client.request<{ agents: Agent[] }>("/agents"),
+    retry: false,
+  });
 
 export function agentPath(id: string): string {
   return `/agents/${encodeURIComponent(id)}`;

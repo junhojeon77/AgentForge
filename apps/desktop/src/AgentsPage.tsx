@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
   type Agent,
+  agentsQuery,
   PERSONA_LIMIT,
   REASONING,
   removeAgent,
@@ -23,7 +24,7 @@ import {
 } from "./ui";
 
 const NEW_AGENT: Agent = { id: "", role: "", model: null, reasoning: "medium", persona: "" };
-// The counter turns amber here, so the limit never comes as a surprise.
+// The counter turns yellow here, so the limit never comes as a surprise.
 const NEAR_LIMIT = 9_500;
 // A server field error names the field as it appears on screen.
 const LABELS: Record<string, string> = {
@@ -164,11 +165,7 @@ export function AgentSummary({
 
 /** The team: every agent the next run gets, to add, edit or remove. */
 export function AgentsPage({ client }: { client: Client }) {
-  const agents = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => client.request<{ agents: Agent[] }>("/agents"),
-    retry: false,
-  });
+  const agents = useQuery(agentsQuery(client));
   // The id being edited; "" while adding a new agent.
   const [editing, setEditing] = useState<string | null>(null);
   // Where focus goes when the editor closes: that agent's Edit, or "" for Add an agent.

@@ -1,21 +1,45 @@
-// The welcome screen, the view choice and the tour, saved in this window's own storage.
+// The welcome screen, the view and theme choices, the tour and how a run is shown, saved in this
+// window's own storage.
 import { log } from "./log";
 
 export type View = "plain" | "technical";
+export type Theme = "dark" | "light";
+export type RunView = "board" | "list";
 /** `tour` is "wanted" from the welcome's Take the tour until the tour ends. */
-export type Guide = { view: View; welcomed: boolean; tour: "wanted" | "done" | "skipped" | null };
+export type Guide = {
+  view: View;
+  welcomed: boolean;
+  tour: "wanted" | "done" | "skipped" | null;
+  theme: Theme;
+  runView: RunView;
+};
 export type GuideStorage = Pick<Storage, "getItem" | "setItem">;
 
 export const GUIDE_KEY = "agentforge.guide";
-export const DEFAULT_GUIDE: Guide = { view: "plain", welcomed: false, tour: null };
+export const DEFAULT_GUIDE: Guide = {
+  view: "plain",
+  welcomed: false,
+  tour: null,
+  theme: "dark",
+  runView: "board",
+};
 
 const VIEWS: unknown[] = ["plain", "technical"];
 const TOURS: unknown[] = ["wanted", "done", "skipped", null];
+// undefined: a save from before slice 9, which gets the defaults rather than a new welcome.
+const THEMES: unknown[] = ["dark", "light", undefined];
+const RUN_VIEWS: unknown[] = ["board", "list", undefined];
 
-function isGuide(value: unknown): value is Guide {
+function isGuide(value: unknown): value is Partial<Guide> {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
-  return VIEWS.includes(v.view) && typeof v.welcomed === "boolean" && TOURS.includes(v.tour);
+  return (
+    VIEWS.includes(v.view) &&
+    typeof v.welcomed === "boolean" &&
+    TOURS.includes(v.tour) &&
+    THEMES.includes(v.theme) &&
+    RUN_VIEWS.includes(v.runView)
+  );
 }
 
 // The saved text and an error's message can quote what was stored, so only the name is logged.
@@ -35,7 +59,7 @@ export function loadGuide(getStorage: GetStorage): Guide {
     const text = storage.getItem(GUIDE_KEY);
     if (text === null) return DEFAULT_GUIDE;
     const saved: unknown = JSON.parse(text);
-    if (isGuide(saved)) return saved;
+    if (isGuide(saved)) return { ...DEFAULT_GUIDE, ...saved };
     log.warn("guide: could not read the saved choices: bad shape");
   } catch (error) {
     log.warn(`guide: could not read the saved choices: ${why(error)}`);
@@ -56,10 +80,10 @@ export function saveGuide(getStorage: GetStorage, guide: Guide): void {
   }
 }
 
-export function finishWelcome(view: View, takeTour: boolean): Guide {
-  const guide: Guide = { view, welcomed: true, tour: takeTour ? "wanted" : "skipped" };
-  log.debug(`guide: welcome passed, view=${view}, tour=${guide.tour}`);
-  return guide;
+export function finishWelcome(guide: Guide, takeTour: boolean): Guide {
+  const tour = takeTour ? "wanted" : "skipped";
+  log.debug(`guide: welcome passed, view=${guide.view}, tour=${tour}`);
+  return { ...guide, welcomed: true, tour };
 }
 
 export function endTour(guide: Guide, finished: boolean): Guide {
@@ -73,8 +97,18 @@ export function setView(guide: Guide, view: View): Guide {
   return { ...guide, view };
 }
 
-/** Back to the welcome screen, which offers the tour again; the view is kept. */
+export function setTheme(guide: Guide, theme: Theme): Guide {
+  log.debug(`guide: theme=${theme}`);
+  return { ...guide, theme };
+}
+
+export function setRunView(guide: Guide, runView: RunView): Guide {
+  log.debug(`guide: run view=${runView}`);
+  return { ...guide, runView };
+}
+
+/** Back to the welcome screen, which offers the tour again; the other choices are kept. */
 export function showAgain(guide: Guide): Guide {
   log.debug("guide: shown again");
-  return { view: guide.view, welcomed: false, tour: null };
+  return { ...guide, welcomed: false, tour: null };
 }

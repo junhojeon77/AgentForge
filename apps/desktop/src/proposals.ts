@@ -1,3 +1,4 @@
+import { queryOptions } from "@tanstack/react-query";
 import type { Agent } from "./agents";
 import { ApiError, type Client, jsonBody } from "./api/client";
 import { plural } from "./ui";
@@ -29,6 +30,7 @@ export interface Proposal {
   reason: string;
   agents: Agent[]; // new agents the lead wants; made only when the plan is approved
   fixes: string; // the run whose reviews this plan fixes, or ""
+  request: string; // the person's words the lead agent planned from, or ""
 }
 
 /** One task's rights as the approve form holds them. */
@@ -141,6 +143,14 @@ export function proposalPath(id: string, action?: "approve" | "reject"): string 
 }
 
 type Requester = Pick<Client, "request">;
+
+/** Every plan, newest first; the side list polls it, and the run board reads the run's plan. */
+export const proposalsQuery = (client: Requester) =>
+  queryOptions({
+    queryKey: ["proposals"],
+    queryFn: () => client.request<{ proposals: Proposal[] }>("/proposals"),
+    retry: false,
+  });
 
 export function planRequest(
   client: Requester,

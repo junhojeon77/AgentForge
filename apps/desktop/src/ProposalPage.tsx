@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { AgentFields, AgentSummary } from "./AgentsPage";
-import type { Agent } from "./agents";
+import { type Agent, agentsQuery } from "./agents";
 import { ApiError, type Client } from "./api/client";
 import { Icon } from "./Icon";
 import {
@@ -31,6 +31,7 @@ import {
   Field,
   Fold,
   ForDevelopers,
+  LABEL,
   LEDE,
   MoreOptions,
   PAGE_TITLE,
@@ -46,7 +47,7 @@ export const STATUS = {
   rejected: "Rejected",
 } as const;
 
-// A plan waiting for your OK needs you (amber); approved is done, rejected is stopped.
+// A plan waiting for your OK needs you (yellow); approved is done, rejected is stopped.
 export const PLAN_GROUP: Record<Proposal["status"], BadgeGroup> = {
   pending: "needs",
   approved: "done",
@@ -466,7 +467,7 @@ function TaskRights({
   return (
     <div className="flex flex-col gap-2">
       <div className="@container rounded-lg border border-line bg-surface">
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-lg border-b border-line bg-panel px-4 py-2 text-meta text-ink-muted">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-lg border-b border-line bg-code-bg px-4 py-2 text-meta text-ink-muted">
           <span>{plural(tasks.length, "task", "tasks")} · nothing is allowed until you tick it</span>
           {/* It only ticks; it never grants checks, attempts or time. */}
           <Button
@@ -480,7 +481,7 @@ function TaskRights({
         </div>
         <div
           aria-hidden="true"
-          className={`${ROW} px-4 pt-2 text-meta font-semibold text-ink-muted @max-[600px]:hidden`}
+          className={`${ROW} px-4 pt-2 ${LABEL} @max-[600px]:hidden`}
         >
           <span>Task</span>
           <span />
@@ -664,11 +665,7 @@ export function NewProposal({
   const [runId, setRunId] = useState(() => newRunId(new Date()));
   const [revisions, setRevisions] = useState(2);
   const [plan, setPlan] = useState<string | null>(null);
-  const agents = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => client.request<{ agents: { role: string }[] }>("/agents"),
-    retry: false,
-  });
+  const agents = useQuery(agentsQuery(client));
   const created = async (proposal: Proposal) => {
     await queryClient.invalidateQueries({ queryKey: ["proposals"] });
     onCreated(proposal.id);

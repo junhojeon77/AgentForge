@@ -7,12 +7,18 @@ import {
   type Guide,
   loadGuide,
   saveGuide,
+  setRunView,
+  setTheme,
   setView,
   showAgain,
 } from "./guide";
 import { placeCard } from "./GuideScreens";
 
 const SECRET = "SECRET-SAVED-TEXT";
+
+// What a first start gets: the plain view, the welcome screen, the dark theme and the board.
+const START: Guide = { view: "plain", welcomed: false, tour: null, theme: "dark", runView: "board" };
+const SETTLED: Guide = { ...START, welcomed: true, tour: "done" };
 
 function logged(): string {
   const calls = [...vi.mocked(console.debug).mock.calls, ...vi.mocked(console.warn).mock.calls];
@@ -61,18 +67,29 @@ beforeEach(() => {
 });
 
 describe("loadGuide", () => {
-  it("starts with the plain view and the welcome screen when nothing is saved", () => {
-    expect(loadGuide(() => memory())).toEqual({ view: "plain", welcomed: false, tour: null });
-    expect(DEFAULT_GUIDE).toEqual({ view: "plain", welcomed: false, tour: null });
+  it("starts with the plain view, the welcome screen, dark and the board when nothing is saved", () => {
+    expect(loadGuide(() => memory())).toEqual(START);
+    expect(DEFAULT_GUIDE).toEqual(START);
     expect(warned()).toBe("");
   });
 
   it("reads back what was saved", () => {
-    const saved: Guide = { view: "technical", welcomed: true, tour: "done" };
+    const saved: Guide = { view: "technical", welcomed: true, tour: "done", theme: "light", runView: "list" };
     const storage = memory({ [GUIDE_KEY]: JSON.stringify(saved) });
 
     expect(loadGuide(() => storage)).toEqual(saved);
     expect(storage.getItem).toHaveBeenCalledWith("agentforge.guide");
+  });
+
+  it("reads a save from before the theme and the run view, adding dark and the board", () => {
+    const old = { view: "technical", welcomed: true, tour: "done" };
+
+    expect(loadGuide(() => memory({ [GUIDE_KEY]: JSON.stringify(old) }))).toEqual({
+      ...old,
+      theme: "dark",
+      runView: "board",
+    });
+    expect(warned()).toBe("");
   });
 
   it.each([
@@ -80,6 +97,8 @@ describe("loadGuide", () => {
     ["an unknown view", JSON.stringify({ view: SECRET, welcomed: true, tour: null }), "bad shape"],
     ["an unknown tour state", JSON.stringify({ view: "plain", welcomed: true, tour: SECRET }), "bad shape"],
     ["a welcome flag that is not true or false", JSON.stringify({ view: "plain", welcomed: SECRET, tour: null }), "bad shape"],
+    ["an unknown theme", JSON.stringify({ ...SETTLED, theme: SECRET }), "bad shape"],
+    ["an unknown run view", JSON.stringify({ ...SETTLED, runView: SECRET }), "bad shape"],
     ["a value that is not an object", JSON.stringify(SECRET), "bad shape"],
     ["null", "null", "bad shape"],
   ])("falls back to the start for %s, logging why but never the saved text", (_, text, why) => {
@@ -109,7 +128,7 @@ describe("loadGuide", () => {
 describe("saveGuide", () => {
   it("writes the choices as JSON under its key", () => {
     const storage = memory();
-    const guide: Guide = { view: "technical", welcomed: true, tour: "wanted" };
+    const guide: Guide = { ...SETTLED, view: "technical", tour: "wanted", theme: "light" };
 
     saveGuide(() => storage, guide);
 
@@ -137,18 +156,15 @@ describe("saveGuide", () => {
 
 describe("the guide's steps", () => {
   it("passes the welcome with the chosen view, wanting the tour or skipping it", () => {
-    expect(finishWelcome("technical", true)).toEqual({
-      view: "technical",
-      welcomed: true,
-      tour: "wanted",
-    });
-    expect(finishWelcome("plain", false)).toEqual({ view: "plain", welcomed: true, tour: "skipped" });
+    const light: Guide = { ...START, view: "technical", theme: "light", runView: "list" };
+    expect(finishWelcome(light, true)).toEqual({ ...light, welcomed: true, tour: "wanted" });
+    expect(finishWelcome(START, false)).toEqual({ ...START, welcomed: true, tour: "skipped" });
     expect(logged()).toContain("guide: welcome passed, view=technical, tour=wanted");
     expect(logged()).toContain("guide: welcome passed, view=plain, tour=skipped");
   });
 
   it("ends the tour as done when finished and as skipped when stopped early", () => {
-    const touring: Guide = { view: "plain", welcomed: true, tour: "wanted" };
+    const touring: Guide = { ...SETTLED, tour: "wanted" };
 
     expect(endTour(touring, true)).toEqual({ ...touring, tour: "done" });
     expect(endTour(touring, false)).toEqual({ ...touring, tour: "skipped" });
@@ -157,16 +173,24 @@ describe("the guide's steps", () => {
   });
 
   it("switches the view and keeps the rest", () => {
-    const guide: Guide = { view: "plain", welcomed: true, tour: "done" };
-
-    expect(setView(guide, "technical")).toEqual({ ...guide, view: "technical" });
+    expect(setView(SETTLED, "technical")).toEqual({ ...SETTLED, view: "technical" });
     expect(logged()).toContain("guide: view=technical");
   });
 
-  it("shows the guide again from the welcome screen, keeping the view", () => {
-    const guide: Guide = { view: "technical", welcomed: true, tour: "skipped" };
+  it("switches the theme and keeps the rest", () => {
+    expect(setTheme(SETTLED, "light")).toEqual({ ...SETTLED, theme: "light" });
+    expect(logged()).toContain("guide: theme=light");
+  });
 
-    expect(showAgain(guide)).toEqual({ view: "technical", welcomed: false, tour: null });
+  it("switches how a run is shown and keeps the rest", () => {
+    expect(setRunView(SETTLED, "list")).toEqual({ ...SETTLED, runView: "list" });
+    expect(logged()).toContain("guide: run view=list");
+  });
+
+  it("shows the guide again from the welcome screen, keeping the view, theme and run view", () => {
+    const guide: Guide = { view: "technical", welcomed: true, tour: "skipped", theme: "light", runView: "list" };
+
+    expect(showAgain(guide)).toEqual({ ...guide, welcomed: false, tour: null });
     expect(logged()).toContain("guide: shown again");
   });
 });

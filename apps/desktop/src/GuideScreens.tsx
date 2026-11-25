@@ -1,12 +1,18 @@
-// The welcome screen, the tour and the side list's view switch; guide.ts keeps the choices.
+// The welcome screen, the tour and the side list's view and theme switches; guide.ts keeps the
+// choices.
 import { useId, useLayoutEffect, useRef, useState } from "react";
-import type { View } from "./guide";
+import type { Theme, View } from "./guide";
 import { log } from "./log";
-import { Button } from "./ui";
+import { Button, LABEL } from "./ui";
 
 const VIEWS: { view: View; label: string; means: string }[] = [
   { view: "plain", label: "Plain", means: "Technical options start folded under More options." },
   { view: "technical", label: "Technical", means: "Technical options start open." },
+];
+
+const THEMES: { theme: Theme; label: string }[] = [
+  { theme: "dark", label: "Dark" },
+  { theme: "light", label: "Light" },
 ];
 
 const HOW = [
@@ -162,7 +168,7 @@ const STEPS: { target: string; side: Side; title: string; text: string }[] = [
     target: "plans",
     side: "right",
     title: "Plans",
-    text: "Plans waiting for your OK show here, marked in amber. Open one to read its tasks and decide what each task may do.",
+    text: "Plans waiting for your OK show here, marked in yellow. Open one to read its tasks and decide what each task may do.",
   },
   {
     target: "runs",
@@ -186,7 +192,7 @@ const STEPS: { target: string; side: Side; title: string; text: string }[] = [
     target: "view",
     side: "above",
     title: "View and guide",
-    text: "Switch between the Plain and Technical view here, or open this guide again.",
+    text: "Switch between the Plain and Technical view, or between a dark and a light window, here. You can also open this guide again.",
   },
 ];
 
@@ -210,17 +216,19 @@ export function Tour({ onEnd }: { onEnd: (finished: boolean) => void }) {
   const id = useId();
   const step = STEPS[index];
   const last = index === STEPS.length - 1;
+  // Taken at the first render, not in the effect: StrictMode runs effects twice in development,
+  // and by the second run the focus is already on the card.
+  const [before] = useState(() => document.activeElement);
 
   // Opened before the step's effect below, so Next takes the focus, not the first button.
   useLayoutEffect(() => {
-    const before = document.activeElement;
     if (dialog.current && !dialog.current.open) dialog.current.showModal();
     return () => {
       // Focus goes back where it was. Deferred: while the modal is still in the page,
       // everything outside it is inert.
       if (before instanceof HTMLElement) setTimeout(() => before.isConnected && before.focus());
     };
-  }, []);
+  }, [before]);
 
   // The highlight and the card's place follow the step, and the window's size.
   useLayoutEffect(() => {
@@ -264,7 +272,7 @@ export function Tour({ onEnd }: { onEnd: (finished: boolean) => void }) {
           className={`absolute size-3 rotate-45 border border-line-strong bg-surface ${NOTCH[placed.side]}`}
         />
       )}
-      <p className="text-meta text-ink-muted tabular-nums">
+      <p className={`${LABEL} tabular-nums`}>
         Step {index + 1} of {STEPS.length}
       </p>
       <div aria-live="polite">
@@ -294,40 +302,34 @@ export function Tour({ onEnd }: { onEnd: (finished: boolean) => void }) {
   );
 }
 
-/** The bottom of the side list: the view switch and the way back to the guide. */
+/** The bottom of the side list: the view and theme switches and the way back to the guide. */
 export function ViewFooter({
   view,
   onView,
+  theme,
+  onTheme,
   onShowAgain,
 }: {
   view: View;
   onView: (view: View) => void;
+  theme: Theme;
+  onTheme: (theme: Theme) => void;
   onShowAgain: () => void;
 }) {
-  const name = useId();
   return (
     <div data-tour="view" className="flex flex-col gap-1 border-t border-line px-3 pt-2 pb-3">
-      <fieldset className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
-        <legend className="float-left mr-1 text-meta leading-5 font-semibold text-ink-muted">
-          View
-        </legend>
-        {VIEWS.map((v) => (
-          <label
-            key={v.view}
-            title={v.means}
-            className="inline-flex cursor-pointer items-center gap-1.5 text-meta"
-          >
-            <input
-              type="radio"
-              name={name}
-              checked={view === v.view}
-              onChange={() => onView(v.view)}
-              className="size-3.5"
-            />
-            {v.label}
-          </label>
-        ))}
-      </fieldset>
+      <Choice
+        legend="View"
+        options={VIEWS.map((v) => ({ value: v.view, label: v.label, means: v.means }))}
+        value={view}
+        onChange={onView}
+      />
+      <Choice
+        legend="Theme"
+        options={THEMES.map((t) => ({ value: t.theme, label: t.label }))}
+        value={theme}
+        onChange={onTheme}
+      />
       <button
         type="button"
         onClick={onShowAgain}
@@ -336,5 +338,43 @@ export function ViewFooter({
         Show the guide again
       </button>
     </div>
+  );
+}
+
+/** A legend and its native radios on one line, wrapping under the legend when narrow. */
+function Choice<T extends string>({
+  legend,
+  options,
+  value,
+  onChange,
+}: {
+  legend: string;
+  options: { value: T; label: string; means?: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  const name = useId();
+  return (
+    <fieldset className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+      <legend className="float-left mr-1 text-meta leading-5 font-semibold text-ink-muted">
+        {legend}
+      </legend>
+      {options.map((o) => (
+        <label
+          key={o.value}
+          title={o.means}
+          className="inline-flex cursor-pointer items-center gap-1.5 text-meta"
+        >
+          <input
+            type="radio"
+            name={name}
+            checked={value === o.value}
+            onChange={() => onChange(o.value)}
+            className="size-3.5"
+          />
+          {o.label}
+        </label>
+      ))}
+    </fieldset>
   );
 }

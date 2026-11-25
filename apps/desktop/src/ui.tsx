@@ -2,6 +2,7 @@
 import {
   type ComponentProps,
   createContext,
+  Fragment,
   type ReactNode,
   useContext,
   useId,
@@ -13,6 +14,31 @@ import { log } from "./log";
 import type { Group } from "./runs";
 
 export const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** Whether a scroll box shows its last line: new lines keep it there only if it already was. */
+export const atBottom = (box: HTMLElement) =>
+  box.scrollHeight - box.scrollTop - box.clientHeight < 2;
+
+/** An id, set in mono. */
+export function Code({ children }: { children: ReactNode }) {
+  return <code className="font-mono">{children}</code>;
+}
+
+/** A `meta` line: items joined by " · ", empty ones left out. */
+export function Meta({ items, className = "" }: { items: ReactNode[]; className?: string }) {
+  const shown = items.filter(Boolean);
+  return (
+    <span className={`text-meta text-ink-muted wrap-anywhere ${className}`}>
+      {shown.map((item, i) => (
+        // Items never move, so their position is a stable key.
+        <Fragment key={i}>
+          {i > 0 && " · "}
+          {item}
+        </Fragment>
+      ))}
+    </span>
+  );
+}
 
 export function problem(error: unknown): string {
   if (error instanceof ApiError) return error.detail ?? error.kind;
@@ -30,13 +56,17 @@ const KIND = {
 };
 type Kind = keyof typeof KIND;
 
+// Every button is a pill.
 const BASE =
-  "inline-flex shrink-0 items-center gap-2 rounded-md text-control font-semibold " +
+  "inline-flex shrink-0 items-center gap-2 rounded-full text-control font-semibold " +
   "disabled:cursor-not-allowed disabled:border disabled:border-line disabled:bg-panel " +
   "disabled:text-ink-muted";
 
 const buttonClass = (kind: Kind, small: boolean) =>
-  `${BASE} ${small ? "h-7 px-2" : "h-8 px-3"} ${KIND[kind]}`;
+  `${BASE} ${small ? "h-7" : "h-8"} ${kind === "ghost" ? "px-2" : small ? "px-3" : "px-3.5"} ${KIND[kind]}`;
+
+/** label-mono: counters and labels on technical surfaces, never an eyebrow over a heading. */
+export const LABEL = "font-mono text-label uppercase text-ink-muted";
 
 export const FIELD = "rounded-md border border-line-strong bg-surface px-2 py-1.5 text-ink";
 
@@ -87,20 +117,29 @@ const BADGES: Record<BadgeGroup, { style: string; icon: IconName }> = {
   finished: { style: "border border-line text-ink", icon: "finished" },
 };
 
-/** A status in words; its colour and icon only repeat the word. */
-export function StatusBadge({ group, label }: { group: BadgeGroup; label: string }) {
+/** A status in words, set as a small mono chip; its colour and icon only repeat the word.
+ * `small` is the side list's size. */
+export function StatusBadge({
+  group,
+  label,
+  small = false,
+}: {
+  group: BadgeGroup;
+  label: string;
+  small?: boolean;
+}) {
   const { style, icon } = BADGES[group];
   return (
     <span
-      className={`inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full pr-2 pl-1.5 text-meta font-semibold whitespace-nowrap ${style}`}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full pr-2 pl-1.5 font-mono font-medium tracking-[0.06em] whitespace-nowrap uppercase ${small ? "h-[18px] text-[10px]" : "h-5 text-[11px]"} ${style}`}
     >
-      <Icon name={icon} className={`size-3.5 ${group === "done" ? "text-done-ink" : ""}`} />
+      <Icon name={icon} className={`size-3 ${group === "done" ? "text-done-ink" : ""}`} />
       {label}
     </span>
   );
 }
 
-/** How many things need the person, as a small amber count; its meaning is in `label`. */
+/** How many things need the person, as a small yellow count; its meaning is in `label`. */
 export function NeedsCount({ count, label }: { count: number; label: string }) {
   if (count === 0) return null;
   return (
@@ -250,7 +289,10 @@ export function Confirm({
       role="group"
       aria-label={question}
       onKeyDown={(e) => {
-        if (e.key === "Escape") setStep("kept");
+        if (e.key !== "Escape") return;
+        // Handled here: inside the task drawer, Escape would otherwise also close the drawer.
+        e.preventDefault();
+        setStep("kept");
       }}
       className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 ${
         destructive ? "border-danger bg-danger-soft" : "border-line-strong bg-panel"
@@ -305,7 +347,9 @@ export function ReasonForm({
     <form
       className="space-y-2"
       onKeyDown={(e) => {
-        if (onKeep && e.key === "Escape") onKeep();
+        if (!onKeep || e.key !== "Escape") return;
+        e.preventDefault(); // as in Confirm: only "keep reviewing", not close the drawer
+        onKeep();
       }}
       onSubmit={(e) => {
         e.preventDefault();

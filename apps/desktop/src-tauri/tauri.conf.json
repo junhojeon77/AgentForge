@@ -10,7 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "AgentForge", "width": 1000, "height": 700 }],
+    "windows": [{ "title": "AgentForge", "width": 1000, "height": 700, "maximized": true }],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8765; style-src 'self' 'unsafe-inline'"
     }
