@@ -307,7 +307,8 @@ def test_a_failed_task_of_a_finished_run_is_retried_through_the_api(make_client)
     assert refused.status_code == 400 and "only a failed or cancelled task" in refused.text
 
 
-def test_the_lead_agent_proposes_a_plan_through_the_api(make_client, tmp_path, monkeypatch):
+def test_the_lead_agent_proposes_a_plan_through_the_api(make_client, tmp_path, monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentforge")
     log = tmp_path / "call.json"
     monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "script")
@@ -328,13 +329,17 @@ def test_the_lead_agent_proposes_a_plan_through_the_api(make_client, tmp_path, m
     script.write_text(json.dumps([drafted, {"issues": []}]), encoding="utf-8")
     monkeypatch.setenv("FAKE_CLAUDE_SCRIPT", str(script))
     client = make_client()
-    body = {"request": "Build it", "run_id": "lead1", "workspace": str(tmp_path)}
+    body = {"request": "Build it\nSECRET-REQUEST", "run_id": "lead1", "workspace": str(tmp_path)}
 
     answer = client.post("/proposals/from-request", json=body, headers=AUTH)
 
     assert answer.status_code == 201
     assert answer.json()["source"] == "lead" and answer.json()["status"] == "pending"
     assert [t["id"] for t in answer.json()["plan"]["tasks"]] == ["api"]
+    # Kept with the plan, so the run's board can say what was asked for; never logged.
+    listed = client.get("/proposals", headers=AUTH).json()["proposals"]
+    assert [p["request"] for p in listed] == ["Build it\nSECRET-REQUEST"]
+    assert "SECRET-REQUEST" not in caplog.text
 
     log.with_name("call.json.all").unlink()
     script.write_text(json.dumps([drafted, {"issues": ["x"]}]), encoding="utf-8")
@@ -373,6 +378,8 @@ def test_the_lead_agent_plans_fixes_from_a_finished_runs_reviews(
     assert answer.status_code == 201
     proposal = answer.json()
     assert proposal["source"] == "lead" and proposal["fixes"] == "r1"
+    assert proposal["request"] == ""  # built from the reviews, not a person's words
+    assert client.get("/proposals/r1", headers=AUTH).json()["request"] == ""  # by hand
     assert [t["id"] for t in proposal["plan"]["tasks"]] == ["fix"]
     draft = json.loads(log.with_name("call.json.all").read_text().splitlines()[0])
     assert draft["cwd"] == str(tmp_path)  # the reviewed run's repository

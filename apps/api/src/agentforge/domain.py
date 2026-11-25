@@ -1,5 +1,6 @@
 """Immutable application contracts."""
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
@@ -140,6 +141,10 @@ class TaskAttempt(Contract):
     failure_reason: FailureReason | None = None
     message: str = ""
     session_id: str | None = None
+    # None on attempts saved before these existed. A resume keeps started_at; stopped_at is the
+    # last time the attempt left ASSIGNED/RUNNING/VALIDATING, and None while it is in one.
+    started_at: datetime | None = None
+    stopped_at: datetime | None = None
 
 
 class Transition(Contract):
@@ -168,6 +173,8 @@ class Proposal(Contract):
     status: Literal["pending", "approved", "rejected"] = "pending"
     reason: str = ""  # why it was rejected
     fixes: str = ""  # the run whose reviews the lead agent planned fixes for
+    # The person's words the lead agent planned from; "" for a hand-written or a fix plan.
+    request: str = ""
 
 
 class RunReport(Contract):

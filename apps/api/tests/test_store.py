@@ -71,6 +71,30 @@ async def test_saved_run_loads_back_equal_to_the_report(tmp_path):
     assert RunStore(path).load("other") is None
 
 
+async def test_attempts_and_proposals_saved_before_their_newer_fields_still_load(tmp_path):
+    path = tmp_path / "runs.db"
+    store = RunStore(path)
+    report = await scheduler(store).run(plan(task("a")))
+    assert report.attempts[0].started_at <= report.attempts[0].stopped_at
+    store.propose(proposal("r1", source="lead", request="Reset a forgotten password by email"))
+    assert store.get_proposal("r1").request == "Reset a forgotten password by email"
+
+    # Rows written before the times and the request existed hold neither key.
+    engine = sqlalchemy.create_engine(f"sqlite:///{path}")
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "UPDATE attempts SET attempt = json_remove(attempt, '$.started_at', '$.stopped_at')"
+        )
+        connection.exec_driver_sql(
+            "UPDATE proposals SET proposal = json_remove(proposal, '$.request')"
+        )
+    engine.dispose()
+
+    attempt = RunStore(path).load("run")[1].attempts[0]
+    assert (attempt.started_at, attempt.stopped_at) == (None, None)
+    assert RunStore(path).get_proposal("r1").request == ""
+
+
 async def test_a_run_id_is_saved_once_and_unfinished_runs_are_listed(tmp_path):
     store = RunStore(tmp_path / "runs.db")
     await scheduler(store).run(plan(task("a")))

@@ -407,6 +407,8 @@ def create_app(
             rounds=result.rounds,
             agents=result.agents,
             fixes=fixes,
+            # A fix plan's request is built from review reports, not written by the person.
+            request="" if fixes else request,
         )
         try:
             server.store.propose(proposal)

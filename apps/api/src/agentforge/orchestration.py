@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
@@ -301,6 +302,7 @@ class Scheduler:
                     "status": status,
                     "failure_reason": changes.get("failure_reason"),
                     "message": changes.get("message", ""),
+                    "stopped_at": None if status in _IN_FLIGHT else datetime.now(UTC),
                 }
             )
         self._record(task_id, status, detail)
@@ -370,6 +372,7 @@ class Scheduler:
                     worker_id=worker.agent.id,
                     number=number,
                     session_id=str(uuid.uuid4()),
+                    started_at=datetime.now(UTC),
                 )
                 self._attempts[task_id, number] = attempt
             previous_failure = self._attempts[task_id, number - 1].message if number > 1 else ""

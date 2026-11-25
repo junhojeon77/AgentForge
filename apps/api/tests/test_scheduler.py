@@ -817,6 +817,48 @@ async def test_paused_running_task_continues_the_same_attempt_on_resume():
     assert by_id(report)["a"].message == ""
 
 
+async def test_an_attempt_keeps_when_it_started_and_when_it_last_stopped_working():
+    executor = GatedExecutor()
+    engine = scheduler(executor)
+    running = asyncio.create_task(engine.run(plan(task("a"))))
+    await asyncio.wait_for(executor.started["a"].wait(), 2)
+
+    working = engine.snapshot().attempts[0]
+    assert working.started_at is not None and working.stopped_at is None
+
+    await engine.pause_task("a")
+    await loop_turn()
+    paused = engine.snapshot().attempts[0]
+    assert paused.started_at == working.started_at
+    assert paused.stopped_at is not None and paused.stopped_at >= paused.started_at
+
+    await engine.resume_task("a")
+    await wait_for(engine, "a", TaskStatus.RUNNING)
+    assert engine.snapshot().attempts[0].stopped_at is None  # working again
+
+    executor.gates["a"].set()
+    report = await asyncio.wait_for(running, 2)
+    done = report.attempts[0]
+    assert done.started_at == working.started_at  # a resume continues the same attempt
+    assert done.stopped_at >= paused.stopped_at
+
+
+async def test_an_attempt_stops_its_clock_while_its_diff_waits_for_a_person():
+    gate = asyncio.Event()
+    engine = scheduler(validator=MockValidator(gate=gate), review_edits=True)
+    running = asyncio.create_task(engine.run(plan(edit("a"))))
+    await wait_for(engine, "a", TaskStatus.AWAITING_APPROVAL)
+    assert engine.snapshot().attempts[0].stopped_at is not None
+
+    await engine.approve_task("a")
+    await wait_for(engine, "a", TaskStatus.VALIDATING)
+    assert engine.snapshot().attempts[0].stopped_at is None
+
+    gate.set()
+    report = await asyncio.wait_for(running, 2)
+    assert report.attempts[0].stopped_at is not None
+
+
 async def test_paused_waiting_task_is_held_and_its_dependents_wait():
     executor = GatedExecutor("b", "c")
     engine = scheduler(executor)
