@@ -13,8 +13,9 @@ states), slice 3 (the run screens: list, run page, controls, diff review, plain 
 (the proposal screens: ask for something, plans, approve with rights, reject), slice 5 (the agent
 editor, and new agents the lead proposes with a plan, made only on approval), slice 6 (the visual
 design of the frame and the run screens, from `docs/design/agentforge`), slice 7 (the welcome
-screen, the plain or technical view and the tour) and slice 8 (the visual design of the remaining
-screens, from the design's second pass) are built. Since 2026-11-24 the reviewer and auditor
+screen, the plain or technical view and the tour), slice 8 (the visual design of the remaining
+screens, from the design's second pass) and slice 9 (the run board, the third pass's look and a
+dark or light theme) are built; slice 10 (live output on the board) is planned. Since 2026-11-24 the reviewer and auditor
 agents ship as defaults, the approval adds a review task after every task given "edit" (the
 scheduler hands each task the diffs of the tasks it waits for), and the lead can plan fixes from a
 finished run's reviews; the audit after integration is a planned M7 slice. LangGraph and

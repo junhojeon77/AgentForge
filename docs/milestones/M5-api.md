@@ -101,7 +101,7 @@ Library changes the API builds on:
 | `retry_task(id)` | A `FAILED` or `CANCELLED` task of the active run gets one more attempt (its limit is raised, up to 5); the tasks it blocked wait again, unless another of their dependencies failed or was cancelled: those are blocked by that one instead |
 | `recover(run_id, retry=[...])` | Also reopens a finished run for the named tasks |
 | `Scheduler(on_transition=...)` | Called with `(run_id, transition)` on every transition; a failing callback is logged, never stops the run |
-| `Proposal`, `PlanRound` | In `domain.py`; proposals are saved in the store (migration `0002`). `Proposal.fixes` (since 2026-11-24): the run whose reviews the plan fixes, else `""`; saved in the proposal's JSON, so no migration |
+| `Proposal`, `PlanRound` | In `domain.py`; proposals are saved in the store (migration `0002`). `Proposal.fixes` (since 2026-11-24): the run whose reviews the plan fixes, else `""`; saved in the proposal's JSON, so no migration. `Proposal.request` (since 2026-11-25, M6 slice 9): the person's words a lead plan was made from; `""` for a hand-written plan, a fix plan (its request is built from review reports) and plans saved before; also in the JSON, never logged |
 | `Assignment.dependency_diffs` | Since 2026-11-24: `(task id, diff)` of each finished dependency that changed files; the Claude Code worker's prompt carries them as data |
 
 ## How to debug a run
@@ -117,6 +117,8 @@ Library changes the API builds on:
 | What did the reviewer find? | The review task's attempt: `result.message` in `GET /runs/{id}` |
 | Which diffs did a task get? | The `diff` of each finished dependency's attempt in the report; the log line `run <id> task <id> gets the diffs of <ids>` |
 | Which run does a fix plan fix? | `fixes` in `GET /proposals/{id}`; the log line `api: proposal <id> plans fixes from run <id>, reviews <ids>` |
+| What was asked for? | `request` in `GET /proposals/{id}` (since 2026-11-25); empty for a hand-written or fix plan |
+| When did attempt N start, and when did it stop working? | `TaskAttempt.started_at` and `stopped_at` in `GET /runs/{id}` (since 2026-11-25); `stopped_at` is empty while it works |
 | Why was a fix plan refused? | The answer's `detail`: the run is active, unknown, or has no finished review with "Must fix" findings, or the new name is taken |
 
 New transition details:

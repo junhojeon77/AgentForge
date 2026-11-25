@@ -16,8 +16,8 @@ local REST API with approvals and live events. The desktop app (M6) is implement
 runs and follows each one live, with its diffs to approve or reject and controls to pause,
 cancel, retry or recover work, and starts runs: ask for something in plain words, then approve
 the lead agent's plan with the rights each task gets, and edits your team of agents (the lead
-agent can propose a new one with a plan). Every screen follows the visual design (dark when
-Windows is dark). On first start a welcome screen explains the app, asks for the plain or
+agent can propose a new one with a plan). Every screen follows the visual design: dark, or light if you pick
+it. A run opens as a board of agent tiles, one group per role under the lead agent. On first start a welcome screen explains the app, asks for the plain or
 technical view and offers a short tour. Every change a task makes is reviewed by the reviewer
 agent, and the lead agent can plan fixes from those reviews.
 
@@ -335,11 +335,17 @@ npm --prefix apps/desktop run tauri dev
 The first time, a welcome screen explains how AgentForge works and asks how the app should look:
 **Plain** (technical options start folded under **More options**) or **Technical** (they start
 open). Then take the short tour, which points at each part of the window, or skip it. The app
-remembers your answers. **View** at the bottom of the side list changes the choice, and **Show
-the guide again** brings back the welcome screen and the tour.
+remembers your answers. **View** at the bottom of the side list changes the choice, **Theme**
+switches the window between dark (the start) and light, and **Show the guide again** brings back
+the welcome screen and the tour.
 
-The window shows whether the server answers and lists every saved run. A run's page shows each
-task with its attempts, diffs and reasons, and follows the active run live. There you approve or
+The window shows whether the server answers and lists every saved run. A run opens as a board:
+the lead agent's box (the plan, what was asked for, the agents not in this run), then one group
+per role with its agent's tile: the task, its status, its time and its last report (live output
+comes in a later slice), and the task's buttons. **Review diff** opens the task in a panel on the
+right with its attempts, diff and review. The pill at the bottom switches to **List**, the page
+with every task's card and the history, and counts the tasks in words. Either way the page
+shows each task with its attempts, diffs and reasons, and follows the active run live. There you approve or
 reject a waiting diff (a rejection needs a reason, which the next attempt is told), pause,
 resume, cancel or retry tasks, and recover a run that a restart interrupted. The app reads the
 token from `%APPDATA%\AgentForge\api-token` again after each server restart.

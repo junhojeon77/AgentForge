@@ -128,8 +128,10 @@ store, state is lost when the process exits.
   `TaskAttempt.message` and `Transition.detail` record them. `Assignment.session_id` (chosen by
   the scheduler, kept on `TaskAttempt.session_id`) and `Assignment.resume` let an attempt stopped
   by a pause be continued. `Assignment.dependency_diffs` carries the diffs of the finished tasks
-  it waits for. `Proposal` is a plan waiting for a person; `Proposal.fixes` names the run whose
-  reviews it fixes.
+  it waits for. `TaskAttempt.started_at` and
+  `stopped_at` say when an attempt started and last stopped working. `Proposal` is a plan
+  waiting for a person; `Proposal.fixes` names the run whose reviews it fixes, and
+  `Proposal.request` keeps the person's words a lead plan was made from.
 - **`orchestration.py`: `Scheduler`.** Two `Protocol` seams are where workers and validators plug
   in: `WorkerExecutor.execute(Assignment) -> WorkerResult` (mock or Claude Code) and
   `ResultValidator.validate(TaskSpec, WorkerResult) -> ValidationReport` (mock or
@@ -300,7 +302,8 @@ Tests are in `apps/api/tests/`:
 
 The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built with Vite.
 
-- **`src-tauri/`: the Rust shell.** `main.rs` only registers `tauri-plugin-fs`.
+- **`src-tauri/`: the Rust shell.** `main.rs` only registers `tauri-plugin-fs`;
+  `tauri.conf.json` opens one window, maximized (1000×700 when restored).
   `capabilities/default.json` lets the window read one file, `$DATA/AgentForge/api-token`
   (`$DATA` is `%APPDATA%`; `$APPDATA` would be the app's own folder). Bundling is off until M8.
 - **`src/api/client.ts`: `createClient({readToken, fetch})`.** `send` adds the bearer token,
@@ -318,7 +321,8 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
 - **`src/api/token.ts`**: `readToken()` through the fs plugin; `null` when there is no file.
 - **`src/connection.ts`: `useConnection`.** It polls `GET /runs` with TanStack Query and maps the
   outcome to a state (`connectionState`); `logState` logs each change.
-- **`src/runs.ts`: the run page's rules.** The report types, `taskActions(status, live,
+- **`src/runs.ts`: the run page's rules.** The report types (with each attempt's `started_at`
+  and `stopped_at`, and the agent on each task), `taskActions(status, live,
   attempt)` (which controls a task offers, mirroring the scheduler, Retry only below 5
   attempts), `STATUS` (each status's words and colour group), `failureLabel`, `runSummary`,
   `retriesLeft`, `attemptStartsOpen`, `reviewAttempt` (the attempt whose review band is on
@@ -329,15 +333,28 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   `sendControl(client, runId, action, task?, reason?)`, which POSTs a run or task control.
 - **`src/RunPage.tsx`: one run.** `runQuery` reads `GET /runs/{id}` with TanStack Query (the side
   list shares it for the active run's count); while the run is active, the page reloads it on
-  every `followEvents` event. The header, task cards, every attempt with its diff, the review
-  band and the history with its task filter. `useControl` gives the header and each card their
-  own pending state and refusal. `FixPlan` (a finished run with "Must fix" reviews) asks
-  before the billed planning, then opens the new plan.
+  every `followEvents` event. The header, then the board (`RunBoard`) or the list (task cards,
+  every attempt with its diff, the review band and the history with its task filter), the
+  `BoardBar` that switches them, and the `TaskDrawer` (a modal `<dialog>` holding a task's card
+  over the board). `useControl` gives the header, each card and each tile their own pending
+  state and refusal; `TaskControls` (a task's own buttons) serves the card and, through
+  `TileControls`, the board's tiles, which `RunBoard` gets as a prop so it never imports this
+  file. `FixPlan` (a finished run with "Must fix" reviews) asks before the billed planning, then
+  opens the new plan.
+- **`src/board.ts`: the run board's rules.** `roleGroups`, `groupTone`, `orderGroups`,
+  `tileTasks` (which tasks get a tile), `countWords`, `agentCount`, `notInRun`, `attemptMs` and
+  `elapsed` (a tile's time), `tileMeta`, `tileLines` (a tile's text until live output),
+  `requestLine` and `wirePath` (a line from the lead agent's box to a group).
+- **`src/RunBoard.tsx`: the board on screen.** The lead agent's box, a group per role, tiles with
+  their output (pinned to the newest line until you scroll up), rows for the other tasks, and
+  the SVG lines, redrawn by a `ResizeObserver`. Groups keep their places while the focus is on
+  the board; a clock ticks once a second only while a live tile works.
 - **`src/ui.tsx`: the pieces every screen shares.** `Button` (primary, secondary, destructive,
   confirm, ghost; busy shows the static arc), `StatusBadge`, `NeedsCount`, `Alert`,
   `CopyButton` and `copyText` (a failure logged by name, never the text), `Confirm` (asks first,
   in place, focus on the safe answer), `ReasonForm` (a required reason), `problem` (an error in
-  words), `plural`, `TechnicalView` (true in the technical view), `Fold` (a summary row with a
+  words), `plural`, `Code` and `Meta` (an id in mono, a `meta` line), `atBottom`, `LABEL` (the
+  mono label), `TechnicalView` (true in the technical view), `Fold` (a summary row with a
   hint, then its content indented; a hand toggle is kept until the page is left),
   `MoreOptions` (a `Fold` of technical fields that starts open only in the technical view, and
   opens for a field error inside), `ForDevelopers` (work only developers do, folded in both
@@ -346,20 +363,23 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
 - **`src/index.css` and `src/Icon.tsx`: the design.** The Tailwind v4 theme from
   [docs/design/agentforge](docs/design/agentforge/README.md): only its colours exist (Tailwind's
   default palette is removed, and an unknown class is silently ignored, so use the design's
-  names), dark follows Windows through `prefers-color-scheme`, system fonts only. `Icon` is the
+  names), dark by default and light under `data-theme="light"` (set by `App` from the saved
+  theme), system fonts only; also the board's dot grid and the drawer's place. `Icon` is the
   design's stroke icon set; every icon sits beside a word.
 - **`src/proposals.ts`: the proposal screens' rules.** The proposal types, `Rights` and
   `NO_RIGHTS`, `approvalBody(repository, rights, agents)` (the approve body, refusing a bad timeout),
   `parsePlan`, `newRunId`, `planTemplate`, `roundsOf(error)`, the words the screens show
   (`rightsSummary`, `draftTitle`, `fixesHint`, `planningSince`) and one function per request:
-  `planRequest`, `planFixes`, `proposePlan`, `approveProposal`, `rejectProposal`.
+  `planRequest`, `planFixes`, `proposePlan`, `approveProposal`, `rejectProposal`;
+  `proposalsQuery` (shared by the side list and the run board).
 - **`src/ProposalPage.tsx`: plans.** `NewProposal` (Ask for something, its planning panel, and
   the JSON editor in `ForDevelopers`) and `ProposalPage` (one plan: its header, numbered task
   cards, new agents, and while pending `Decide`, with the `TaskRights` table, and reject).
   `STATUS` and `PLAN_GROUP` give a plan's status its words and badge. Technical fields sit in
   `MoreOptions`.
 - **`src/agents.ts`: the team's rules.** `Agent`, `REASONING`, `PERSONA_LIMIT`, `toId(name)`,
-  `agentPath`, `saveAgent` (PUT) and `removeAgent` (DELETE).
+  `agentPath`, `saveAgent` (PUT), `removeAgent` (DELETE) and `agentsQuery` (shared by Your team,
+  Ask for something and the run board).
 - **`src/AgentsPage.tsx`: Your team.** The grid of cards, the editor across the grid and
   remove. `AgentFields` (how it should work with its counter, and model and reasoning under More
   options) is shared with the plan page's new agents, whose role stays as proposed; the editor
@@ -371,12 +391,14 @@ The desktop app (M6) is in `apps/desktop`: Tauri 2, React and TypeScript, built 
   yet it opens Ask for something. It shows the welcome screen until it is passed, the tour
   while one is wanted and the app is connected, and marks the tour's targets with `data-tour`.
 - **`src/guide.ts`: the guide's saved choices.** `Guide` (the view, whether the welcome was
-  passed, the tour wanted, done or skipped), `loadGuide` and `saveGuide` (the window's
+  passed, the tour wanted, done or skipped, the theme and whether a run opens as a board or a
+  list; a save from before the last two gets dark and the board), `loadGuide` and `saveGuide` (the window's
   `localStorage`, passed in; a bad or unreadable value falls back to the start and is logged
-  by reason, never by its text), and `finishWelcome`, `endTour`, `setView` and `showAgain`.
+  by reason, never by its text), and `finishWelcome`, `endTour`, `setView`, `setTheme`,
+  `setRunView` and `showAgain`.
 - **`src/GuideScreens.tsx`: the guide on screen.** `Welcome`, `Tour` (a modal `<dialog>` per
   step, with a notch toward its target, which `index.css` marks with a dashed line) and
-  `ViewFooter` (the side list's **View** switch and **Show the guide again**). `placeCard`
+  `ViewFooter` (the side list's **View** and **Theme** switches and **Show the guide again**). `placeCard`
   works out the card's side and place from the measured target and window.
 - **`src/log.ts`**: console lines prefixed `agentforge.desktop:`. Ids, statuses, paths and
   reasons only, never the token or response text.

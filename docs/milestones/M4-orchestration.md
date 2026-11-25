@@ -213,6 +213,7 @@ accepted it on the first round. Two sessions, $0.004.
 | `TaskState.attempt_number` | The latest attempt started; 0 before the first |
 | `TaskAttempt.message` | Why this attempt failed, was paused or was cancelled; empty otherwise |
 | `TaskAttempt.session_id` | The attempt's session id, kept across a pause |
+| `TaskAttempt.started_at`, `stopped_at` | Added on 2026-11-25 (M6 slice 9) for the run board's tile time. `started_at` is when the attempt was first assigned and survives a pause; `stopped_at` is when it last left `ASSIGNED`/`RUNNING`/`VALIDATING`, and empty while it is in one. UTC; `None` on attempts saved before. Saved in the attempt's JSON, so no migration |
 | `Transition.detail` | Why the transition happened. Never empty; the texts are listed under [How to debug a run](#how-to-debug-a-run) |
 | `RunReport.attempts` | Every attempt of every task, in dispatch order. A paused and resumed attempt is one entry |
 | `WorktreeExecutor` path | `root/<run_id>/<task_id>/<attempt>` (was `root/<run_id>/<task_id>` in M3). An existing path is reused only when `Assignment.resume` is set |

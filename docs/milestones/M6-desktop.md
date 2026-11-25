@@ -1,7 +1,8 @@
 # M6 — Desktop dashboard
 
 M6 gives AgentForge a window: a Tauri 2 desktop app to follow runs live, approve plans and
-diffs, control tasks and edit agents on screen. It was built in eight slices and is implemented within the limits below.
+diffs, control tasks and edit agents on screen. It was built in nine slices and is implemented within the limits below; live output on the
+run board is planned as slice 10.
 
 The app is for people who do not code as well as those who do ([who it is
 for](../../README.md)): every screen leads with the plain path in plain words and keeps each
@@ -17,11 +18,82 @@ technical control one click away, under **More options** or a "for developers" s
 | 6 | Visual design of the frame and the run screens, from a Claude Design pass | Implemented on 2026-11-21 |
 | 7 | Welcome screen, the plain or technical view (whether **More options** starts open) and a tour, changeable later | Implemented on 2026-11-22; styled in slice 8 |
 | 8 | Visual design of Ask for something, the plan page, Your team, the welcome screen and the tour, from a second Claude Design pass | Implemented on 2026-11-23 |
+| 9 | The run board (lead agent, a group per role, agent tiles, a task drawer, Board or List), a new look for every screen and a dark or light theme, from a third Claude Design pass | Implemented on 2026-11-25 |
+| 10 | Live output on the board's tiles: the server forwards each agent's Claude Code output | Planned |
 
 Slice 1 is the API side, slice 2 the app's shell, slice 3 the run screens, slice 4 the proposal
 screens, slice 5 the agent editor, slice 6 the visual design of the frame and the run screens,
-slice 7 the welcome screen, the view choice and the tour, and slice 8 the visual design of every
-screen slice 6 left plain.
+slice 7 the welcome screen, the view choice and the tour, slice 8 the visual design of every
+screen slice 6 left plain, and slice 9 the run board and the third pass's look.
+
+## Delivered behavior (slice 9)
+
+**The design's third pass.** Claude Design drew a board for a run and a new look for every
+screen. The copy in [docs/design/agentforge](../design/agentforge/README.md) is now that third
+pass; it says where the app goes its own way (the Theme switch, the lead agent's summary, rose
+lines for trouble).
+
+**The new look.** Warm charcoal for the window, coral for actions and work in progress, yellow
+only for what needs you, rose for trouble. Every button is a pill. Status badges are small
+uppercase mono chips; the word is the same, only set like a terminal tag. Counters and labels on
+technical surfaces are mono capitals too: the side list's "RUNS 12", "Tasks 4 · 1 waits for you",
+the History table's header, the rights table's header and the tour's "Step 2 of 6". A task card's
+title and status sit in a darker strip, like a terminal window's bar. The status bar's text is
+mono. Cards have 10px corners.
+
+**Dark, or light if you pick it.** The app starts dark. **Theme: Dark / Light** under the side
+list (beside **View**) switches the whole window at once, and the choice is kept with the view.
+It no longer follows the Windows setting. The window opens maximized (title bar and taskbar
+stay; restoring it gives 1000×700). The tour's Plans card now says plans are "marked in
+yellow", and its last card names the Theme switch too.
+
+**A run opens as a board.** The run's header and its controls (**Pause run**, **Cancel run**,
+**Recover run**) stay on top as before. Under them, on a faint dot grid:
+
+- **The lead agent's box:** the plan's id, what was asked for (the request's first line; "Fixes
+  the reviews of run X" for a fix plan; "Written by hand." for a hand-written one), the counts
+  ("5 tasks · 5 agents"), "Not in this run: `auditor`, …" for the team's agents whose role the
+  run does not use, and **Open plan**.
+- **One group per role**, with a line from the lead agent's box to each. Groups with a diff
+  waiting for you come first, then groups at work, then the rest in the plan's order. A group
+  never moves while the focus is on the board; it moves once you leave it.
+- **A group's border, line and dot take its state:** yellow when something waits for you, rose
+  when something failed, coral while something works; charcoal otherwise. Its header says the
+  same in words ("· 1 waits for you · 2 tasks").
+- **An agent tile** for each task at work, waiting for you or in trouble (or, when the role
+  rests, its next task, else its last). It shows the agent, the status, the task, its output and
+  a foot line: "Attempt 1 of 3 · 3m 12s · live", or for a task not started yet, what it may do
+  ("Read-only · 1 attempt allowed"). The tile's buttons are the task's own: **Pause** and
+  **Cancel** while it works, **Retry** when it failed, **Resume** when it is paused, and **Review
+  diff** (the board's main button) while it waits for you; **Open task** otherwise. A refusal
+  shows under them.
+- **The output** is plain text in a small scroll box that follows the newest line until you
+  scroll up. Until the server streams live output (slice 10), it says "Live output appears here
+  when the server sends it." while the agent works, and otherwise shows the last report, why the
+  attempt failed, "Waiting for your review.", or what a resting task waits for ("Resting. Starts
+  when `api` and `ui` are done.").
+- **The role's other tasks** are rows under the tile; a row opens its task.
+
+**The task drawer.** **Review diff**, **Open task** or a row opens the task on the right, over
+the board, with exactly the List view's card: attempts, diff and the review band. **Review diff**
+lands on **Approve diff**; **Open task** on the card's title. The board stays in sight and keeps
+updating; the drawer stays open after you approve or reject, so you see what happened. **Close**
+or Escape closes it and puts the focus back on the button that opened it (taken when the
+drawer opens, so it also works under React's development `StrictMode`; the tour's card got the
+same fix, as it lost the focus the same way). Escape inside the
+reject reason or a cancel question only steps back there. In a narrow window the drawer covers
+the whole page.
+
+**Board or List.** A pill at the bottom switches the run between **Board** and **List** (the
+page as before, kept for anyone who prefers it or uses a screen reader) and counts the run's
+tasks in words ("1 working · 1 waits for you · 1 done · 2 waiting"). The choice is kept with the
+view, for every run.
+
+**Times and requests from the server.** Each attempt now records when it started and when it last
+stopped working (`TaskAttempt.started_at`, `stopped_at`), and a plan made from your words keeps
+them (`Proposal.request`); see the [M5 doc](M5-api.md#contract). Both live in rows the store
+already keeps as JSON, so there is no migration; older runs and plans show no time and no
+request.
 
 ## Reviews and fix plans on screen (added on 2026-11-24)
 
@@ -164,7 +236,8 @@ and static previews. The app follows it:
   OK, an interrupted run, No token, "Live updates stopped"); red for trouble. A status is always
   a word ("Awaiting approval"), and its colour and icon only repeat it. Only Needs you, Working
   and Problem badges are filled.
-- **Dark when Windows is dark.** The theme follows the Windows app setting; there is no toggle.
+- **Dark when Windows is dark.** The theme followed the Windows app setting, with no toggle,
+  until slice 9 made it dark with a Theme switch.
 - **System fonts only** (Segoe UI Variable, Cascadia Mono), so nothing loads from the network.
 - **Every control can be reached with the keyboard** and shows a focus ring; every icon sits beside
   a word.
@@ -380,7 +453,7 @@ one default in a new profile keeps the other four.
 | `agentforge.api` | DEBUG | `api: run <id> starts with agents <ids>` |
 | `agentforge.api` | DEBUG | A refused agent request or a broken persona file: the existing `<method> <path> answered <status>`; the detail, which can quote the file, is never logged |
 
-### The desktop app (slices 2 to 8)
+### The desktop app (slices 2 to 9)
 
 | Question | Where the answer is |
 |---|---|
@@ -408,6 +481,10 @@ one default in a new profile keeps the other four.
 | How do I see a first start again? | **Show the guide again**, or clear the window's local storage (right-click, Inspect, Application, Local storage) and reload |
 | Why is there no **Plan fixes from the reviews** button? | It shows only on a finished run with a finished review whose report holds "Must fix" (`hasReviews` in `runs.ts`, as `_reviews` in `api.py` decides). A review that found nothing gives the lead nothing to plan |
 | Why did planning the fixes fail? | The message under the button (the server's `detail`); the console has `POST /runs/<id>/fix-plan answered <status>` |
+| Why does a tile show no live output? | The server does not stream it yet (slice 10). The tile shows the last attempt's report, or why it failed, from the run report |
+| Why does a tile show no time? | The attempt has no `started_at`: it was saved before slice 9. Or the run is not active and the attempt never stopped (it was interrupted); no time is better than a growing one |
+| Why does the lead agent's box not say what was asked for? | The plan was written by hand, or made before slice 9 (`Proposal.request` is empty), or the run has no plan (started from the command line) |
+| Why did the window turn light, or the run open as a list? | The Theme and Board/List choices are kept with the view in `agentforge.guide`; the console has `guide: theme=<theme>` / `guide: run view=<board or list>` |
 | What did the app do, in order? | The webview's developer console (right-click, Inspect, in `tauri dev`): lines starting `agentforge.desktop:` |
 
 | Console level | Line |
@@ -421,7 +498,7 @@ one default in a new profile keeps the other four.
 | debug | `events for run <id> dropped after <sequence>; reconnecting` / `events for run <id> ended after <sequence>` |
 | warn | `events for run <id> stopped: <status or kind>` |
 | warn | `copy <what> failed: <error name>`: never the copied text, since a diff can hold secrets |
-| debug | `guide: welcome passed, view=<view>, tour=<wanted or skipped>` / `guide: tour step <n> of 6 (<part>)` / `guide: tour <done or skipped>` / `guide: view=<view>` / `guide: shown again` |
+| debug | `guide: welcome passed, view=<view>, tour=<wanted or skipped>` / `guide: tour step <n> of 6 (<part>)` / `guide: tour <done or skipped>` / `guide: view=<view>` / `guide: theme=<dark or light>` / `guide: run view=<board or list>` / `guide: shown again` |
 | warn | `guide: could not read the saved choices: <reason>` / `guide: could not save the choices: <reason>`: `bad shape`, `no storage` or the error's name, never the saved text |
 
 The token, request and response bodies (a reject reason, a request's text, a plan among them),
@@ -466,7 +543,15 @@ run report; the console lines above are their record.
 - **The planning panel's time moves in whole minutes** and is checked every 15 seconds.
 - **The active run's report is read every 2 seconds** for the waiting-diffs count, on top of the
   reloads its live events cause.
-- **The theme follows Windows;** there is no light or dark switch in the app.
+- **The theme does not follow Windows;** the app starts dark and the Theme switch changes it.
+- **The board has no live output** until slice 10; its tiles show the last report.
+- **A tile's time counts from the attempt's start to when it last stopped working,** pauses and
+  the wait for your review included once it works again; it is shown only for attempts saved
+  since slice 9. After a crash and **Recover run**, it includes the time the server was down:
+  the attempt is stamped as stopped when the run is recovered.
+- **"Not in this run" reads the team as it is now,** not as it was when the run started.
+- **The board is drawn from the plan,** with no pan, zoom or dragging; a very large plan makes a
+  long page.
 - **The token path is fixed** to the real `%APPDATA%`. A server started with a different
   `APPDATA` writes a token the app cannot see.
 - **The app is run with `tauri dev`;** no installer is built (M8).
@@ -476,11 +561,32 @@ run report; the console lines above are their record.
 | Deferred | Waits for |
 |---|---|
 | A command-line option for allowed origins | When a second client needs it |
+| Live output on the board's tiles | Slice 10 |
 
 ## Acceptance checks
 
 Run the pytest and Ruff commands in the root README, plus `npm --prefix apps/desktop test` and
-`npm --prefix apps/desktop run build`. The tests for reviews and fix plans (2026-11-24):
+`npm --prefix apps/desktop run build`. Slice 9's tests:
+
+- `test_scheduler.py`: an attempt keeps when it started; it has no stop time while it works, one
+  when it is paused or waits for review, none again once it works after a resume or an approval,
+  and one when it is done; a resume keeps the start.
+- `test_store.py`: attempts and proposals saved before `started_at`, `stopped_at` and `request`
+  existed load with empty values; the times and the request are saved and read back.
+- `test_api.py`: a plan made from a request keeps it in `GET /proposals` and never logs it; a fix
+  plan and a hand-written plan have none.
+- `board.test.ts`: groups by role in plan order; a group's colour (waits for you, then trouble,
+  then working); the group order; which tasks get a tile; the counts in words; the agents a run
+  uses and the team's agents not in it; an attempt's time (live, stopped, interrupted, saved
+  before times) and how it is written; a tile's foot line and its text for every state;
+  the request's first line; the line from the lead agent's box to a group.
+- `guide.test.ts`: the theme and run view saved and read back, dark and the board on a first
+  start, a save from before slice 9 read with those defaults (no new welcome), an unknown theme
+  or run view falling back to the start, and the switches logged.
+
+The board, the drawer, the new look and the Theme switch have no tests of their own (that would
+need a DOM library); `tsc` and the window check cover them. The tests for reviews and fix plans
+(2026-11-24):
 
 - `proposals.test.ts`: `planFixes` sends the run's `fix-plan` path, encoded, with the new name.
 - `runs.test.ts`: `hasReviews` is true for a finished review with "Must fix" findings, and false
