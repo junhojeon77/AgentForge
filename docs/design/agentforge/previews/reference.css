@@ -420,3 +420,153 @@ code, .af-code { font-family: var(--font-mono); font-size: 12px; }
 .af-field__help .af-counter { flex: none; }
 .af-field__error > span { flex: 1; min-width: 0; }
 .af-field__error code { font-family: var(--font-mono); }
+
+/* =====================================================================
+   Third pass: the board look. Same components, restyled: warm dark tiles,
+   pill buttons, mono counters, terminal-like title strips.
+   ===================================================================== */
+:root, [data-theme="dark"] { color-scheme: dark; }
+[data-theme="light"] { color-scheme: light; }
+
+/* Buttons are pills. */
+.af-btn { border-radius: var(--radius-full); padding: 0 14px; font-weight: 600; }
+.af-btn--sm { padding: 0 var(--space-3); }
+.af-btn--ghost { padding: 0 var(--space-2); }
+.af-sidetop .af-btn { border-radius: var(--radius-full); }
+
+/* Mono counters and labels, uppercase: technical surfaces only, never an eyebrow over a heading. */
+.af-mono-label, .af-sidebar__heading, .af-section__title small, .af-tour__step, .af-rights__head, .af-table th {
+  font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+.af-section__title small { color: var(--ink-muted); }
+
+/* Status badges: small mono chips. The word stays; it is just set like a terminal tag. */
+.af-badge { font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; height: 20px; padding: 0 8px 0 6px; }
+.af-badge .af-icon { width: 12px; height: 12px; }
+.af-runitem .af-badge { height: 18px; font-size: 10px; }
+
+/* Tiles: a darker title strip, like a terminal window's bar. */
+.af-card, .af-agent, .af-ptask, .af-rights, .af-tour, .af-dev, .af-confirm { border-radius: var(--radius-lg); }
+.af-card__head { background: var(--code-bg); border-bottom: 1px solid var(--line); border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0; }
+.af-card--needs .af-card__head { border-radius: calc(var(--radius-lg) - 2px) calc(var(--radius-lg) - 2px) 0 0; }
+.af-card__actions { padding-top: var(--space-3); }
+.af-card__title { font-size: 14px; }
+.af-rights__bar { background: var(--code-bg); }
+
+/* The status bar and ids read as technical: mono. */
+.af-statusbar { font-family: var(--font-mono); font-size: 12px; }
+.af-statusbar .af-btn { font-family: var(--font-sans); }
+
+/* Tabs: the active tab is coral. */
+.af-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+
+/* =====================================================================
+   Board view of a run: the lead agent, one group per role, agent tiles
+   with live output. Fits the main area and scrolls; no pan or zoom.
+   ===================================================================== */
+.af-board { position: relative; min-height: 100%; padding: var(--space-6) var(--space-6) 88px;
+  background-color: var(--canvas); background-image: radial-gradient(var(--line) 1px, transparent 1.2px); background-size: 20px 20px; }
+.af-board__wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+.af-board__wires path { fill: none; stroke: var(--line-strong); stroke-width: 1.5; }
+.af-board__wires path.is-live { stroke: var(--working-edge); }
+.af-board__wires path.is-needs { stroke: var(--needs-edge); }
+.af-board__wires circle { fill: var(--canvas); stroke: var(--line-strong); stroke-width: 1.5; }
+.af-board__wires circle.is-live { stroke: var(--working-edge); }
+.af-board__wires circle.is-needs { stroke: var(--needs-edge); }
+
+/* The lead agent's node */
+.af-lead { position: relative; z-index: 1; width: min(380px, 100%); margin: 0 auto 56px; background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg); }
+.af-lead__bar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--code-bg); border-bottom: 1px solid var(--line);
+  border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0; }
+.af-lead__bar .af-spacer { flex: 1; }
+.af-lead__body { padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+.af-lead__title { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
+.af-lead__sum { margin: 0; font-size: 13px; line-height: 18px; }
+.af-lead__out { margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-muted); }
+.af-lead__out code { color: var(--ink); }
+
+/* Groups: one per role in the run */
+.af-groups { position: relative; z-index: 1; list-style: none; margin: 0 auto; padding: 0; max-width: var(--content-max-w);
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-8) var(--space-4); align-items: start; }
+.af-group { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 0 var(--space-2) var(--space-2); min-width: 0; }
+.af-group--live { border-color: color-mix(in oklch, var(--working-edge) 60%, var(--line)); }
+.af-group--needs { border-color: var(--needs-edge); }
+.af-group--problem { border-color: color-mix(in oklch, var(--problem-edge) 70%, var(--line)); }
+.af-group__head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-1); min-height: 32px; }
+.af-group__name { margin: 0; font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
+.af-group__count { font-family: var(--font-mono); font-size: 11px; line-height: 16px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted); }
+.af-group__head .af-spacer { flex: 1; }
+.af-group__body { display: flex; flex-direction: column; gap: var(--space-2); }
+
+/* A status dot: always beside a word. */
+.af-dot { width: 8px; height: 8px; border-radius: var(--radius-full); flex: none; background: var(--waiting-edge); }
+.af-dot--working { background: var(--working-edge); }
+.af-dot--needs { background: var(--needs-edge); }
+.af-dot--problem { background: var(--problem-edge); }
+.af-dot--done { background: var(--done-ink); }
+.af-dot--held { background: transparent; border: 2px solid var(--held-edge); }
+
+/* The agent tile: the AI view */
+.af-tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); min-width: 0; display: flex; flex-direction: column; }
+.af-tile--working { border-color: color-mix(in oklch, var(--working-edge) 70%, var(--line)); }
+.af-tile--needs { border: 1px solid var(--needs-edge); }
+.af-tile--problem { border-color: var(--problem-edge); }
+.af-tile__bar { display: flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-2) 6px var(--space-3); background: var(--code-bg); border-bottom: 1px solid var(--line);
+  border-radius: calc(var(--radius-md) - 1px) calc(var(--radius-md) - 1px) 0 0; min-width: 0; }
+.af-tile--needs .af-tile__bar { background: var(--needs-soft); color: var(--needs-ink); border-bottom-color: var(--needs-edge); }
+.af-tile--problem .af-tile__bar { background: var(--problem-soft); color: var(--problem-ink); }
+.af-tile__agent { margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-weight: 600; flex: none; }
+.af-tile__task { flex: 1; min-width: 0; font-size: 12px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; opacity: 1; }
+.af-tile__bar .af-badge { flex: none; }
+.af-tile__out { margin: 0; height: var(--tile-output-h); overflow: auto; padding: var(--space-2) var(--space-3); background: var(--code-bg);
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 17px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.af-tile__out--short { height: auto; max-height: 72px; }
+.af-o { display: block; }
+.af-o--tool { color: var(--ink-muted); }
+.af-o--tool::before { content: "› "; color: var(--accent); }
+.af-o--res { color: var(--ink-muted); padding-left: 2ch; }
+.af-o--ok { color: var(--done-ink); }
+.af-o--err { color: var(--problem-ink); }
+.af-o--you { color: var(--needs-ink); font-weight: 600; }
+.af-o--sys { color: var(--ink-muted); font-style: italic; }
+.af-cursor { display: inline-block; width: 7px; height: 13px; vertical-align: -2px; background: var(--accent); }
+.af-tile__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: 6px var(--space-2) 6px var(--space-3); border-top: 1px solid var(--line); min-height: 40px; }
+.af-tile__meta { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px; line-height: 16px; letter-spacing: 0.04em; color: var(--ink-muted); }
+.af-tile__foot .af-btn { height: 26px; font-size: 12px; padding: 0 10px; }
+
+/* Queued and finished tasks of the role, as rows */
+.af-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.af-queue li { display: flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-2); font-size: 12px; line-height: 16px; border-top: 1px dashed var(--line); min-width: 0; }
+.af-queue li:first-child { border-top: 0; }
+.af-queue code { font-size: 12px; color: var(--ink); }
+.af-queue .af-q__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-muted); }
+
+/* The board bar: view switch and counts, pinned to the bottom of the main area */
+.af-boardbar-wrap { position: sticky; bottom: var(--space-4); z-index: 5; display: flex; justify-content: center; pointer-events: none; margin-top: -64px; }
+.af-boardbar { pointer-events: auto; display: inline-flex; align-items: center; gap: var(--space-3); padding: 4px var(--space-3) 4px 4px; background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-full); max-width: calc(100% - 32px); flex-wrap: wrap; }
+.af-seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-full); padding: 2px; background: var(--code-bg); }
+.af-seg label { position: relative; display: inline-flex; align-items: center; height: 26px; padding: 0 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; color: var(--ink-muted); cursor: pointer; }
+.af-seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.af-seg label:has(input:checked) { background: var(--selected); color: var(--ink); }
+.af-seg label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.af-boardbar__counts { display: flex; flex-wrap: wrap; gap: 2px var(--space-3); font-family: var(--font-mono); font-size: 11px; line-height: 16px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted); }
+.af-boardbar__counts span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* The task drawer: a task's full card over the board */
+.af-drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 20; width: min(var(--drawer-w), 100%); margin: 0; padding: 0; max-height: none; height: auto;
+  background: var(--canvas); color: var(--ink); border: 0; border-left: 1px solid var(--line-strong); overflow: auto; display: flex; flex-direction: column; }
+.af-drawer::backdrop { background: transparent; }
+.af-drawer__head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  background: var(--panel); border-bottom: 1px solid var(--line); }
+.af-drawer__head h2 { margin: 0; flex: 1; min-width: 0; font-size: 14px; line-height: 20px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-drawer__body { padding: var(--space-4); }
+.af-main--board { position: relative; }
+.af-tile__bar .af-spacer { flex: 1; }
+.af-tile__taskline { margin: 0; padding: 4px var(--space-3); font-size: 12px; line-height: 16px; color: var(--ink-muted); background: var(--surface); border-bottom: 1px solid var(--line);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-tile__taskline code { color: var(--ink); font-size: 12px; }
+.af-tile--needs .af-tile__taskline { color: var(--ink); }
+.af-drawer { left: auto; }
+.af-main--board { container: board-main / inline-size; }
+@container board-main (max-width: 720px) { .af-drawer { width: 100%; border-left: 0; } }

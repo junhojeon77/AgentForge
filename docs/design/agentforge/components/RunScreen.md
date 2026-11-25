@@ -1,6 +1,6 @@
 # RunScreen
 
-The whole 1000×700 window for checklist state 3: an active run with a diff waiting and its review open. It shows how the frame, sidebar, header, cards, attempt, diff and review panel fit together.
+The whole 1000×700 window in the **List view** (chosen with the BoardBar; the Board view is the default, see BoardScreen) for checklist state 3: an active run with a diff waiting and its review open. It shows how the frame, sidebar, header, cards, attempt, diff and review panel fit together.
 
 **Consumer provides:** nothing; this is a composition of the other components, for reference.
 

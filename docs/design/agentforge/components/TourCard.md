@@ -12,7 +12,7 @@ One step of the six-step tour: a small card beside the part of the window it exp
 - Keyboard: focus starts on Next (Finish on the last step). Tab cycles inside the card; Enter on Next goes on; Escape is End tour. Ending or finishing puts focus back on what had it before the tour.
 - Steps and copy:
   1. Ask for something: "Start here. Say what you want built in your own words; the lead agent turns it into a plan you approve before any work starts."
-  2. Plans: "Plans waiting for your OK show here, marked in amber. Open one to read its tasks and decide what each task may do."
+  2. Plans: "Plans waiting for your OK show here, marked in yellow. Open one to read its tasks and decide what each task may do."
   3. Runs: "Each approved plan becomes a run. Follow its tasks as they work, and review every change before it is accepted."
   4. Your team: "The agents that do the work. Change how each one should work, or add a new one."
   5. The status bar: "Shows whether the app can reach the AgentForge server on this computer. If it can't, the steps to start it appear below."

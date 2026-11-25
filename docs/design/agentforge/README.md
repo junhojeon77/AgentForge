@@ -1,12 +1,12 @@
-AgentForge is a local Windows desktop app for supervising AI coding agents. A person watches runs that last minutes to hours, reads agents' diffs, and approves, rejects, pauses, cancels, retries or recovers work. The interface is a calm, dense instrument panel: quiet neutrals everywhere, and colour spent only where a person needs to act.
+AgentForge is a local-first Windows app where one lead agent coordinates specialized coding agents. It ships with seven, and any of them can be added, removed or fully customized. A person watches runs that last minutes to hours on a board of agent tiles, reads agents' diffs, and approves, rejects, pauses, cancels, retries or recovers work. The interface is a calm, dense board: warm dark neutrals everywhere, and colour spent only where a person needs to act.
 
 **Who it is for.** People who do not code: they ask for something in their own words, the lead agent plans it, they approve the plan, and the team of agents builds it. People who do code can still customize, fine-tune or edit anything and feel at home. Lead every screen with the plain path in plain words ("May change files", not `allowed_operations`) and keep each technical control one click away under **More options** or a "for developers" section, never removed. A first-start survey and guide (M6 slice 7) lets each person choose whether those sections start open.
 
 ## Principles
 
-1. **The person is in control, so "Needs you" is the loudest thing on screen.** A diff waiting for review gets the amber `needs-*` treatment: a 2px `needs-edge` border on its card, a bordered badge, and the review band open at the foot of its attempt. Nothing else in the app uses amber except the "No token" status bar, the Interrupted run marker and the live-updates notice, which also need the person.
+1. **The person is in control, so "Needs you" is the loudest thing on screen.** A diff waiting for review gets the yellow `needs-*` treatment: a 2px `needs-edge` border on its card, a bordered badge, and the review band open at the foot of its attempt. Nothing else in the app uses yellow except the "No token" status bar, the Interrupted run marker and the live-updates notice, which also need the person.
 2. **Status is always a word.** Colour and icon only repeat it. Never show a dot, colour or icon alone.
-3. **Colour only where it means something.** Graphite for the interface, petrol for actions and work in progress, amber for "needs you", red for trouble. Waiting, paused, done and cancelled tasks stay neutral and are told apart by word and icon shape. Grounds are `canvas`, `panel` and `surface`; dividers are `line`. No shadows, gradients, blur or glows. Hierarchy comes from type weight, colour and borders, not size alone.
+3. **Colour only where it means something.** Warm charcoal for the interface, coral for actions and work in progress, yellow for "needs you", rose for trouble. Waiting, paused, done and cancelled tasks stay neutral and are told apart by word and icon shape. Grounds are `canvas`, `panel` and `surface`; dividers are `line`. No shadows, gradients, blur or glows. Hierarchy comes from type weight, colour and borders, not size alone.
 4. **Untrusted text stays plain.** Diffs, agent reports, reasons and server messages render as plain text in `code-block`, never as Markdown or HTML, and they wrap or scroll inside their box without moving the layout.
 5. **Every control says what it acts on.** "Pause task build", not "Pause", in the accessible name; the visible label can be short inside the task's own card.
 
@@ -21,9 +21,11 @@ AgentForge is a local Windows desktop app for supervising AI coding agents. A pe
 
 ## Colour
 
-The palette is AgentForge's own, defined in OKLCH and stored as hex: a faintly green-grey **graphite** (hue 200) for grounds and text, **petrol** (hue 218) for action and work, **amber** for the person, **brick red** for trouble, and a muted **green** only for the Done check and added diff lines. None of it is Tailwind's default palette, and the Tailwind setup removes those defaults so they can't creep back in.
+The palette is AgentForge's own, defined in OKLCH and stored as hex: a warm **charcoal** (hue 55) for grounds and text, **coral** (hue 40) for action and work, **yellow** (hue 85) for the person, **rose** (hue 10 to 15) for trouble, and a muted **green** only for the Done check and added diff lines. Coral and rose sit close in hue, so they are never the only difference: trouble always carries its word and the triangle icon, and destructive buttons are outlined while coral buttons are filled. None of it is Tailwind's default palette, and the Tailwind setup removes those defaults so they can't creep back in.
 
-Two themes: **Light** (default; white `canvas`, graphite `ink`) and **Dark** (graphite, not navy; no glows), set with `data-theme="dark"` on `<html>`. Dark is optional: ship it only if it follows the Windows setting; there is no toggle. Every token is defined in both. All text pairs below meet WCAG AA in both themes (4.5:1); edges, the focus ring and control borders meet 3:1 (160 pairs checked). The closest: light `needs-edge` on `needs-soft` 3.3:1, dark `line-strong` on `needs-soft` 3.5:1.
+The look is a board of tiles: a warm near-black `canvas`, a darker `panel` for the side list and status bar, cards one step lighter (`surface`) with a darker title strip (`code-bg`), thin `line` borders, pill buttons, and small uppercase mono counters. No glows, gradients, blur or shadows.
+
+Two themes: **Dark** (the default) and **Light** (warm off-white, the same roles), set with `data-theme="light"` on `<html>`; the app starts dark, and the Theme choice under the side list (ViewFooter) switches it to light. Every token is defined in both. All text pairs below meet WCAG AA in both themes (4.5:1); edges, the focus ring and control borders meet 3:1 (164 pairs checked). The closest: light `accent` on `panel` 4.8:1, dark `line-strong` on `needs-soft` 3.3:1, light `needs-edge` on `needs-soft` 3.35:1.
 
 ### Grounds and text
 
@@ -33,14 +35,14 @@ Two themes: **Light** (default; white `canvas`, graphite `ink`) and **Dark** (gr
 | Status bar, sidebar, sticky table header | `panel` | Same text tokens as `canvas`. |
 | Task cards, inputs, secondary buttons | `surface` | Same. Cards carry a 1px `line` border. |
 | Hover on list items and secondary buttons | `hover` | `ink` only. |
-| Selected run in the sidebar | `selected` (petrol tint) + a 3px `accent` bar | `ink` only, semibold. |
+| Selected run in the sidebar | `selected` (coral tint) + a 3px `accent` bar | `ink` only, semibold. |
 | Diff and long-text boxes | `code-bg` | `diff-ctx-ink` for context lines, `ink` for reports. |
 | Dividers and card borders | `line` | Decorative only. |
 | Input, textarea and secondary-button borders | `line-strong` | 3:1 against `canvas`, `panel`, `surface`. |
 
 ### Actions
 
-- **Primary** (petrol `accent` fill, `on-accent` text): Approve diff, Recover run, and the one main action of an empty or disconnected screen. At most one primary per card or header.
+- **Primary** (coral `accent` fill, `on-accent` text, pill-shaped like every button): Approve diff, Recover run, and the one main action of an empty or disconnected screen. At most one primary per card or header.
 - **Secondary** (`surface` fill, `line-strong` border, `ink` text): Pause, Resume, Retry, Reconnect, Keep it.
 - **Destructive** (`surface` fill, `danger` border and text; `danger-soft` on hover): Cancel run, Cancel, Reject diff. Destructive buttons are outlined so they never compete with the primary.
 - **Destructive confirm** (`danger` fill, `on-danger` text): only the "Yes, cancel" and "Reject diff" buttons that finish a confirm or a reject form.
@@ -90,7 +92,8 @@ System fonts only (the window blocks web fonts): `sans` is Segoe UI Variable Tex
 - `body` (14/20): default text.
 - `control` (13/16 semibold): buttons, tabs, sidebar items.
 - `meta` (12/16): the card's meta line, helper text, in `ink-muted`.
-- `badge` (12/16 semibold): status badges and run-state chips.
+- `badge`: status badges and run-state chips are now set as small mono chips (11px, uppercase, `0.06em` tracking), like a terminal tag. The word is unchanged.
+- `label-mono` (11/16 mono, uppercase, `0.08em` tracking): counters and labels on technical surfaces only: "RUNS · 132", "TASKS 4 · 1 WAITS FOR YOU", table headers, "STEP 5 OF 6". Never an eyebrow above a heading, never a sentence.
 - `code` (13/20 mono): ids and commands.
 - `code-block` (12/18 mono): diffs, agent reports, check output.
 
@@ -116,7 +119,7 @@ Use tabular numerals (`font-variant-numeric: tabular-nums`) for history numbers 
 - The main page scrolls on its own. Its content stops at `content-max-w` on wide windows.
 - Below 900px window width the sidebar narrows to `sidebar-w-narrow` and the page header's controls wrap under the title. At 800px everything still fits without horizontal scrolling of the page (only the diff box scrolls sideways).
 - Spacing uses the 4px steps: `space-2` between buttons, `space-4` inside and between cards, `space-6` around the page and between sections.
-- Radius: `radius-sm` for inline code and tiles, `radius-md` for controls and boxes, `radius-lg` for cards, `radius-full` for badges and dots only. Never one radius on everything.
+- Radius: `radius-sm` for inline code and tiles, `radius-md` for inputs and boxes, `radius-lg` (10px) for cards and the tour card, `radius-full` for buttons, badges, counts and dots. Never one radius on everything.
 - Forms and prose (Ask for something, Your team's lede, the plan's decision text) stop at `form-max-w` (720px), so lines stay readable; task cards, the rights table and the team grid use the full content width.
 - Nesting: one level of box at most inside a card (a diff or long-text box). The review band and attempts are full-width rows of the card, not boxes inside it.
 
@@ -134,7 +137,8 @@ People who don't code come first; people who do keep every control. Every screen
 
 | Screen | Components | Guide |
 |---|---|---|
-| Run page | PageHeader, TaskCard, Attempt, DiffView, LongText, ReviewBox, InlineConfirm, Feedback, HistoryTable | RunScreen |
+| Run page, Board view (default) | PageHeader, BoardGroup, AgentTile, BoardBar, TaskDrawer (which holds the List view's TaskCard) | BoardScreen, BoardReviewScreen |
+| Run page, List view | PageHeader, TaskCard, Attempt, DiffView, LongText, ReviewBox, InlineConfirm, Feedback, HistoryTable, BoardBar | RunScreen |
 | Ask for something | AskForm, MoreOptions, ForDevelopers | AskScreen |
 | A plan's page | PlanPage, TaskRights, AgentEditor (for proposed agents), MoreOptions | PlanScreen, ApproveScreen |
 | Your team | AgentCard, AgentEditor, MoreOptions | TeamScreen |
@@ -147,8 +151,20 @@ Rules the second pass adds:
 - **One primary per section.** Ask for something: Plan it. A plan: Approve and start. Your team: Add an agent (the open editor's Save is its own section's primary). Welcome: Take the tour. Tour card: Next or Finish.
 - **Billed actions ask first, in place,** with the plain confirm (`panel`, `line-strong`), not the red one: billing is not destruction. Destructive actions keep the red confirm (Remove agent) or a required reason (Reject plan, Reject diff).
 - **Long waits are watched, not animated:** a Working panel with the static arc, the time since it started, and every field locked.
-- **Nothing granted by default.** The rights table starts empty, counts what will be granted, and warns in amber when no task may change files.
+- **Nothing granted by default.** The rights table starts empty, counts what will be granted, and warns in yellow when no task may change files.
 - **The tour's highlight is a dashed `accent` line drawn inside its target, never an outline,** so it can't hide or be mistaken for the solid `focus` ring.
+
+## The run board
+
+A run opens as a board: the lead agent on top, one group per role below it, and in each group that role's agent as a tile with its live output. It is AgentForge's own take on a board of agent consoles, kept to what a person supervising a plan needs:
+
+- **It fits the main area and scrolls.** No pan, zoom or dragging: the layout comes from the plan, so it is the same for everyone and works with the keyboard.
+- **Structure:** the lead agent's node (the plan, a one-line summary, the agents not in this run), lines to each role group, and in each group the agent's tile, then the role's other tasks as rows. Groups with something waiting for you come first.
+- **The tile is the AI view:** the agent, its task, its status and its live output, plain text in `mono`, pinned to the newest line until the person scrolls up. Its buttons are the task's own (Pause, Cancel, Review diff, Retry, Resume).
+- **Reviewing stays the same:** Review diff opens the task in a drawer on the right, with exactly the List view's card, attempts, diff and review band.
+- **The run controls stay in the page header** in both views. A pill at the bottom switches Board and List and counts the tasks in words.
+- **Colour on the board** follows the same rule: the lines, group borders and tile strips take their state (coral working, yellow waits for you, rose trouble); everything else is charcoal. The faint dot grid belongs to the board only, never to forms or lists, and never fades.
+- **Live output needs one server addition.** The server already reads each task's Claude Code event stream (`ClaudeCodeRunner.on_event`, keyed by task id) but does not pass it on. Forward it over the run's existing event stream as an `output` event, one per line, as plain text with ANSI codes stripped: `{task, attempt, kind: "tool" | "result" | "text" | "error", text}`. Keep the last 200 lines per task in memory (not in the store) so a reopened board can fill its tiles, and never log them. Until then, each tile shows the last attempt's report.
 
 ## Interaction states
 

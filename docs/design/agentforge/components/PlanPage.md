@@ -5,7 +5,7 @@ One plan: who wrote it, its status, how the lead agent fixed it, its tasks, and,
 **Consumer provides:** the proposal (id, source, status, reason, rounds, tasks, proposed agents), the server's checks, the project folder from Ask for something, and the approve, reject and open-run handlers.
 
 - Layout: `af-page`; prose and forms stay within `form-max-w`, task cards and the rights table use the full content width.
-- **Header:** "Plan `run-20261122-0130`" in `page-title` with the id in `mono`, and a status badge: **Waiting for your OK** (Needs you, amber: the only amber here), **Approved** (outline, check in `done-ink`), **Rejected** (outline, stop icon). Under it in `meta`: "Written by the lead agent · 4 tasks" or "Written by hand · …".
+- **Header:** "Plan `run-20261122-0130`" in `page-title` with the id in `mono`, and a status badge: **Waiting for your OK** (Needs you, yellow: the only yellow here), **Approved** (outline, check in `done-ink`), **Rejected** (outline, stop icon). Under it in `meta`: "Written by the lead agent · 4 tasks" or "Written by hand · …".
   - Approved: "Approved: it runs as run `run-…`." with a check icon and an **Open run** secondary button.
   - Rejected: "Your reason for rejecting it" and the reason quoted in a plain-text box (`code-bg`, `line`, `pre-wrap`).
 - **"What the lead agent fixed along the way"**: a MoreOptions-style fold, always starting folded (in both views; it is history, not a setting), hint "2 drafts, 3 issues fixed". Inside, "Draft 1, found by the rule check:" or "found by the lead agent's review:" and the issues as bullets, plain text. Drafts count from 1.
